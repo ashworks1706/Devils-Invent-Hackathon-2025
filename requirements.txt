@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 google-generativeai
 google-genai
 python-dotenv
@@ -9,3 +10,12 @@ pillow
 mss
 pyaudio
 pyserial
+=======
+cffi==1.17.1
+hidapi==0.14.0.post4
+hidapi-usb==0.3.2
+pycparser==2.22
+pydualsense==0.7.3
+pyserial==3.5
+setuptools==77.0.3
+>>>>>>> 1c26eeec197e09a8560ef180a763561e126f048d
