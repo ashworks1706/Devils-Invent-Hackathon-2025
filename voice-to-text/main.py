@@ -32,6 +32,30 @@ def move_right(x: int):
     engine.say(f"Moving right by {x} units")
     engine.runAndWait()
 
+def move_forward(x: int):
+    """Execute forward movement by x units"""
+    print(f"🚀 Moving forward by {x} units!")
+    engine.say(f"Moving forward by {x} units")
+    engine.runAndWait()
+
+def move_backward(x: int):
+    """Execute backward movement by x units"""
+    print(f"🚀 Moving backward by {x} units!")
+    engine.say(f"Moving backward by {x} units")
+    engine.runAndWait()
+
+def move_up(x: int):
+    """Execute upward movement by x units"""
+    print(f"🚀 Moving up by {x} units!")
+    engine.say(f"Moving up by {x} units")
+    engine.runAndWait()
+
+def move_down(x: int):
+    """Execute downward movement by x units"""
+    print(f"🚀 Moving down by {x} units!")
+    engine.say(f"Moving down by {x} units")
+    engine.runAndWait()
+
 # Configure Gemini model
 model = genai.GenerativeModel(
     model_name="gemini-2.0-flash",
@@ -73,6 +97,62 @@ model = genai.GenerativeModel(
                         },
                         required=["x"]
                     )
+                ),
+                genai.protos.FunctionDeclaration(
+                    name="move_forward",
+                    description="Moves object forward by a specified number of units",
+                    parameters=content.Schema(
+                        type=content.Type.OBJECT,
+                        properties={
+                            "x": content.Schema(
+                                type=content.Type.INTEGER,
+                                description="Number of units to move forward"
+                            )
+                        },
+                        required=["x"]
+                    )
+                ),
+                genai.protos.FunctionDeclaration(
+                    name="move_backward",
+                    description="Moves object backward by a specified number of units",
+                    parameters=content.Schema(
+                        type=content.Type.OBJECT,
+                        properties={
+                            "x": content.Schema(
+                                type=content.Type.INTEGER,
+                                description="Number of units to move backward"
+                            )
+                        },
+                        required=["x"]
+                    )
+                ),
+                genai.protos.FunctionDeclaration(
+                    name="move_up",
+                    description="Moves object upward by a specified number of units",
+                    parameters=content.Schema(
+                        type=content.Type.OBJECT,
+                        properties={
+                            "x": content.Schema(
+                                type=content.Type.INTEGER,
+                                description="Number of units to move up"
+                            )
+                        },
+                        required=["x"]
+                    )
+                ),
+                genai.protos.FunctionDeclaration(
+                    name="move_down",
+                    description="Moves object downward by a specified number of units",
+                    parameters=content.Schema(
+                        type=content.Type.OBJECT,
+                        properties={
+                            "x": content.Schema(
+                                type=content.Type.INTEGER,
+                                description="Number of units to move down"
+                            )
+                        },
+                        required=["x"]
+                    )
                 )
             ]
         )
@@ -84,7 +164,6 @@ chat = model.start_chat(history=[])
 async def process_voice_command(command: str):
     """Process voice command through Gemini"""
     try:
-        print("hello")
         response = await chat.send_message_async(command)
         print("raw response : ", response)
         for part in response.parts:
@@ -94,6 +173,14 @@ async def process_voice_command(command: str):
                     move_left(**func_call.args)
                 elif func_call.name == "move_right":
                     move_right(**func_call.args)
+                elif func_call.name == "move_forward":
+                    move_forward(**func_call.args)
+                elif func_call.name == "move_backward":
+                    move_backward(**func_call.args)
+                elif func_call.name == "move_up":
+                    move_up(**func_call.args)
+                elif func_call.name == "move_down":
+                    move_down(**func_call.args)
             elif hasattr(part, 'text'):
                 print(f"🤖: {part.text}")
                 engine.say(part.text)
