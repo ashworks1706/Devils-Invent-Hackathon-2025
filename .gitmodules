@@ -1,0 +1,3 @@
+[submodule "dobot-python"]
+	path = dobot-python
+	url = git@github.com:benjuntilla/dobot-python.git
