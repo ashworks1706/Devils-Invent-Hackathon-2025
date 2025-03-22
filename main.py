@@ -53,6 +53,8 @@ You have these capabilities:
 - grab(): Pick up an object at the current position
 - drop(): Release the currently held object
 - move_relative(dx,dy,dz): Move the arm relative to its current position
+- home() : Return the arm to its home position
+- set_movement_speed(velocity, acceleration): Set the movement speed and acceleration for the arm
 
 When asked to perform physical tasks, use these functions by stating the command clearly.
 For example, say "I'll move the arm to the left" or "Let me grab that object for you".
@@ -84,6 +86,18 @@ class AudioLoop:
         self.holding_object = False
         print("Robot initialized with position:", self.current_position)
 
+    def home(self):
+        """Return the robot to its home position"""
+        print("Returning to home position")
+        robot.home()
+        self.current_position = {"x": 0, "y": 0, "z": 0}
+        return "Returned to home position"
+    
+    def set_movement_speed(self, velocity=10, acceleration=10):
+        """Set the movement speed and acceleration for point-to-point movements."""
+        print(f"Setting movement speed: velocity={velocity}, acceleration={acceleration}")
+        robot.set_movement_speed(velocity=velocity, acceleration=acceleration)
+        return f"Movement speed set to velocity={velocity}, acceleration={acceleration}"
     # Movement functions
     def move_to(self, x=None, y=None, z=None):
         """Move to absolute coordinates"""
