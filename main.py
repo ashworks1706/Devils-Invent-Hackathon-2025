@@ -344,13 +344,14 @@ class AudioLoop:
         while True:
             turn = self.session.receive()
             async for response in turn:
+                print("RAW RESPONSE : ",text)
                 if data := response.data:
                     self.audio_in_queue.put_nowait(data)
                     continue
                 if text := response.text:
                     # Process commands in the text response
                     processed_text = self.process_commands(text)
-                    print(processed_text, end="")
+                    # print(processed_text, end="")
 
             # If you interrupt the model, it sends a turn_complete.
             # For interruptions to work, we need to stop playback.
@@ -373,7 +374,7 @@ class AudioLoop:
         
         result_text = text
         
-        print(text)
+        
         
         # Check for commands with coordinates
         for cmd, func in commands.items():
