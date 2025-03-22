@@ -17,17 +17,18 @@ import PIL.Image
 import mss
 
 import argparse
+import pyttsx3
 
 from google import genai
 import re
 import json
-from dobot_controller import DobotController
+# from dobot_controller import DobotController
 
-# Initialize the robot
-robot = DobotController()
+# # Initialize the robot
+# robot = DobotController()
 
-# Return home
-robot.home()
+# # Return home
+# robot.home()
 
 MAX_Z = 200
 MIN_Z = -200
@@ -53,33 +54,30 @@ client = genai.Client(api_key='AIzaSyAR_4Nk8x9jq2rl4FIZ6v4OudZSuwvYyDg',http_opt
 SYSTEM_INSTRUCTION = """
 You are an AI assistant controlling a robotic arm. You can help the user by moving the arm and manipulating objects. You have to follow the grid on the background to identify where to move. The scripts are hard coded so you just have to identify the object and use your function for relative position from the board.
 You have these capabilities:
-- pickup_from(pos): Move the arm to pos coordinate (eg. A5, D5, etc) and grab
-- drop_to(pos): Move the arm relative to pos coordinate (eg. A5, D5, etc) and drop
+- pickup_from_to(pickup_pos, dropoff_pos): Move the arm to pickup position coordinate (eg. A5, D5, etc), grab object and drop at dropoff position coordinate (eg. A5, D5, etc).
+- home(): Return the robot to its home position and cancel any operations.
 
 When asked to perform physical tasks, use these functions by stating the command clearly.
-For example, say "I'll move the arm to the left" or "Let me grab that object for you".
-Always confirm actions by describing what you're doing.
 
-RESPONSE ONLY IN JSON FORMAT
+RESPONSE ONLY IN JSON FORMAT WHEN REQUIRED
 
 FOLLOW THIS GUIDELINE FOR THE JSON FORMAT. ALL ARGUMENTS ARE REQUIRED.
 
-1. pickup_from function :
+1. pickup_from_to function :
 ```json
 {
-    "function": "pickup_from",
+    "function": "pickup_from_to",
     "arguments": {
-        "pos": "D5",
+        "pickup_pos": "D5",
+        "dropoff_pos": "D2"
     }
 }
 ```
-2. drop_to function :
+2. home function :
 ```json
 {
-    "function": "drop_to",
-    "arguments": {
-        "pos": "D2,
-    }
+    "function": "home",
+    "arguments": {}
 }
 ```
 
@@ -104,62 +102,52 @@ class AudioLoop:
         self.coordinates={}
         self.holding_object = False
 
-    def home(self):
+    async def home(self):
         """Return the robot to its home position"""
-        print("Returning to home position")
-        robot.home()
-        return "Returned to home position"
+        await self.speak_text("Cancelling positions and Returning to home position")
+        # robot.home()
+        return "Cancelled operations and Returned to home position"
     
     
-    def pickup_from(self, pos: str):
-        """Move to relative pos coordinates"""
+    async def pickup_from_to(self, pickup_pos: str, dropoff_pos: str):
+        """Move to relative pos coordinates and pickup then drop to position"""
             
-        # map pos coordinate
+        await self.speak_text(f"Moving on to {pickup_pos} for pickup and dropped to {dropoff_pos}")
         
-        x,y,z = self.coordinates[pos]
+        # # map pos coordinate
         
-        print(f"Moving on X axis: x={x}, y={y} for pickup")
+        # x,y,z = self.coordinates[pos]
         
-        # move to the position
+        # self.speak_text(f"Moving on X axis: x={x}, y={y} for pickup")
+                
+        # robot.move_to(x, y, MAX_Z)
         
-        robot.move_to(x, y, MAX_Z)
+        # self.speak_text(f"Going down on z axis: z={z}")
+                
+        # robot.move_to(x, y, MIN_Z)
         
-        print(f"Dropping on z axis: z={z} for pickup ")
+        # self.speak_text("Grabbing object")
         
-        # drop towards the object to pick up
+        # robot.set_gripper(enable=True, grip=True)
         
-        robot.move_to(x, y, MIN_Z)
+        # self.speak_text(f"Going up on z axis: z={z}")
+                
+        # robot.move_to(x, y, MAX_Z)
         
-        print("Grabbing object")
+        # self.speak_text(f"Moving on X axis: x={x}, y={y} for dropoff")
+                
+        # self.speak_text(f"Going down on z axis: z={z} for dropoff ")
+                
+        # robot.move_to(x, y, MIN_Z)
         
-        robot.set_gripper(enable=True, grip=True)
+        # self.speak_text("Dropping object")
         
-        return f"Moved to position: {pos} and grabbed object "
+        # robot.set_gripper(enable=True, grip=False)
         
-    def drop_to(self,pos:str):
-        """Move to relative pos coordinates"""
-            
-        # map pos coordinate
         
-        x,y,z = self.coordinates[pos]
         
-        print(f"Moving on X axis: x={x}, y={y} for dropoff")
+        return f"Picked up object from position : {pickup_pos} and  dropped the object to position: {dropoff_pos}"
         
-        # move to the position
-        
-        robot.move_to(x, y, MAX_Z)
-        
-        print(f"Dropping on z axis: z={z} for dropoff ")
-        
-        # drop towards the object to pick up
-        
-        robot.move_to(x, y, MIN_Z)
-        
-        print("Grabbing object")
-        
-        robot.set_gripper(enable=True, grip=False)
-        
-        return f"Moved to position: {pos} and grabbed object "
         
 
     async def send_text(self):
@@ -199,10 +187,10 @@ class AudioLoop:
             # causing the audio pipeline to overflow if you don't to_thread it.
             try:
                 cap = await asyncio.to_thread(
-                    # cv2.VideoCapture, "/dev/video0"
+                    cv2.VideoCapture, "/dev/video0"
                     # integrated camera
                     # external camera
-                    cv2.VideoCapture, "/dev/video4"
+                    # cv2.VideoCapture, "/dev/video4"
                 )  
                 print("Camera initialized successfully")
             except Exception as e:
@@ -314,17 +302,6 @@ class AudioLoop:
         
         cv2.destroyAllWindows()
 
-    async def get_screen(self):
-
-        while True:
-            frame = await asyncio.to_thread(self._get_screen)
-            if frame is None:
-                break
-
-            await asyncio.sleep(1.0)
-
-            await self.out_queue.put(frame)
-
     async def send_realtime(self):
         while True:
             msg = await self.out_queue.get()
@@ -362,7 +339,19 @@ class AudioLoop:
             bytestream = await self.audio_in_queue.get()
             await asyncio.to_thread(stream.write, bytestream)
 
-    def process_tool_calls(self, response):
+    async def speak_text(self, text: str):
+        """Speak out the given text string."""
+        try:
+            print(f"Speaking: {text}")
+            engine = pyttsx3.init()
+            engine.setProperty('rate', 150)  # Adjust speaking rate
+            engine.setProperty('volume', 0.9)  # Adjust volume (0.0 to 1.0)
+            engine.say(text)
+            engine.runAndWait()
+        except Exception as e:
+            print(f"Error in speak_text: {e}")
+
+    async def process_tool_calls(self, response):
         """Process tool calls from the model response."""
         try:
             if not response.text:
@@ -384,17 +373,17 @@ class AudioLoop:
                 print(f"Debug: Function called: {function_name} with args: {function_args}")
                 
                 # Execute the appropriate function based on the tool call
-                if function_name == "pickup_from":
-                    result = self.pickup_from(function_args["pos"])
-                elif function_name == "drop_to":
-                    result = self.drop_to(function_args["pos"])
+                if function_name == "pickup_from_to":
+                    result = await self.pickup_from_to(function_args["pickup_pos"], function_args["dropoff_pos"])
                 else:
                     result = f"Unknown function: {function_name}"
+                    await self.speak_text(result)
                 
                 print(f"Debug: Function result: {result}")
                 return result
             except json.JSONDecodeError as json_e:
-                print(f"Debug: Error parsing response text as JSON: {json_e}")
+                print(f"Debug: Error parsing response text as JSON: {json_e} for text: {response.text}")
+                await self.speak_text(response.text)
         except Exception as e:
             print(f"Error processing response text: {e}")
             return None
@@ -406,7 +395,7 @@ class AudioLoop:
             async for response in self.session.receive():
                 print("Response received")  
                 # # Check for tool calls
-                tool_result = self.process_tool_calls(response)
+                tool_result = await self.process_tool_calls(response)
                 if tool_result:
                     print(f"Tool execution result: {tool_result}")
                 
@@ -431,7 +420,7 @@ class AudioLoop:
                     response_modalities=["TEXT"],
                             system_instruction=types.Content(parts=[{"text": SYSTEM_INSTRUCTION}]),  
                         tools=[
-                        self.pickup_from, self.drop_to
+                        self.pickup_from_to
                         ],
                     )
                 ) as session, 
