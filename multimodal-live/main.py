@@ -30,6 +30,11 @@ python Get_started_LiveAPI.py --mode screen
 ```
 """
 
+# Add this import at the top
+import numpy as np
+
+
+
 import asyncio
 import base64
 import io
@@ -54,6 +59,8 @@ RECEIVE_SAMPLE_RATE = 24000
 CHUNK_SIZE = 1024
 
 MODEL = "models/gemini-2.0-flash-exp"
+
+# os.environ["QT_QPA_PLATFORM"] = "wayland"
 
 DEFAULT_MODE = "camera"
 
@@ -110,41 +117,132 @@ class AudioLoop:
         image_bytes = image_io.read()
         return {"mime_type": mime_type, "data": base64.b64encode(image_bytes).decode()}
 
-    async def get_frames(self):
-        # This takes about a second, and will block the whole program
-        # causing the audio pipeline to overflow if you don't to_thread it.
-        cap = await asyncio.to_thread(
-            cv2.VideoCapture, 0
-        )  # 0 represents the default camera
 
+
+
+    async def get_frames(self):
+        try:
+            # This takes about a second, and will block the whole program
+            # causing the audio pipeline to overflow if you don't to_thread it.
+            try:
+                cap = await asyncio.to_thread(
+                    cv2.VideoCapture, 0
+                )  # 0 represents the default camera
+                print("Camera initialized successfully")
+            except Exception as e:
+                print(f"Error initializing camera: {e}")
+                return
+            
+            # Create a window to display the video
+            try:
+                cv2.namedWindow("Camera Feed", cv2.WINDOW_NORMAL)
+                print("Display window created")
+            except Exception as e:
+                print(f"Error creating window: {e}")
+                cap.release()
+                return
+
+            while True:
+                try:
+                    # Get frame for processing
+                    ret, frame = await asyncio.to_thread(cap.read)
+                    print("Frame read")
+                    if not ret:
+                        print("Failed to capture frame")
+                        break
+                except Exception as e:
+                    print(f"Error reading frame: {e}")
+                    break
+                    
+                try:
+                    # Display the frame
+                    # await asyncio.to_thread(cv2.imshow, "Camera Feed", frame)
+                    cv2.imshow( "Camera Feed", frame)
+                    print("Frame displayed")
+                except Exception as e:
+                    print(f"Error displaying frame: {e}")
+                
+                try:
+                    # Process frame for sending to model
+                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    img = PIL.Image.fromarray(frame_rgb)
+                    img.thumbnail([1024, 1024])
+
+                    image_io = io.BytesIO()
+                    img.save(image_io, format="jpeg")
+                    image_io.seek(0)
+
+                    mime_type = "image/jpeg"
+                    image_bytes = image_io.read()
+                    print("Frame processed")
+                except Exception as e:
+                    print(f"Error processing frame: {e}")
+                    continue
+                
+                try:
+                    # Check for key press (q to quit)
+                    key = cv2.waitKey(1) & 0xFF
+                    print("Checking for key press")
+                    if key == ord('q'):
+                        print("User requested exit")
+                        break
+                except Exception as e:
+                    print(f"Error checking key press: {e}")
+
+                try:
+                    await asyncio.sleep(1.0)
+                    await self.out_queue.put({"mime_type": mime_type, "data": base64.b64encode(image_bytes).decode()})
+                    print("Frame sent to model")
+                except Exception as e:
+                    print(f"Error sending frame to model: {e}")
+                
+        except Exception as e:
+            print(f"Unexpected error in get_frames: {e}")
+            traceback.print_exc()
+        finally:
+            try:
+                # Release the VideoCapture object and close windows
+                if 'cap' in locals():
+                    cap.release()
+                cv2.destroyAllWindows()
+                print("Camera resources released")
+            except Exception as e:
+                print(f"Error releasing resources: {e}")
+
+    async def get_screen(self):
+        # Create a window to display the screen capture
+        cv2.namedWindow("Screen Capture", cv2.WINDOW_NORMAL)
+        
         while True:
-            frame = await asyncio.to_thread(self._get_frame, cap)
-            if frame is None:
+            # Get screen capture
+            sct = mss.mss()
+            monitor = sct.monitors[0]
+            screenshot = await asyncio.to_thread(sct.grab, monitor)
+            
+            # Convert to numpy array for display
+            img_np = np.array(screenshot)
+            img_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGBA2BGR)
+            
+            # Display the frame
+            await asyncio.to_thread(cv2.imshow, "Screen Capture", img_bgr)
+            
+            # Process for sending to model
+            image_io = io.BytesIO()
+            PIL.Image.fromarray(screenshot).save(image_io, format="jpeg")
+            image_io.seek(0)
+
+            mime_type = "image/jpeg"
+            image_bytes = image_io.read()
+            
+            # Check for key press (q to quit)
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q'):
                 break
 
             await asyncio.sleep(1.0)
-
-            await self.out_queue.put(frame)
-
-        # Release the VideoCapture object
-        cap.release()
-
-    def _get_screen(self):
-        sct = mss.mss()
-        monitor = sct.monitors[0]
-
-        i = sct.grab(monitor)
-
-        mime_type = "image/jpeg"
-        image_bytes = mss.tools.to_png(i.rgb, i.size)
-        img = PIL.Image.open(io.BytesIO(image_bytes))
-
-        image_io = io.BytesIO()
-        img.save(image_io, format="jpeg")
-        image_io.seek(0)
-
-        image_bytes = image_io.read()
-        return {"mime_type": mime_type, "data": base64.b64encode(image_bytes).decode()}
+            await self.out_queue.put({"mime_type": mime_type, "data": base64.b64encode(image_bytes).decode()})
+        
+        cv2.destroyAllWindows()
 
     async def get_screen(self):
 
