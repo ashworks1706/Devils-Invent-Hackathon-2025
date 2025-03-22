@@ -396,79 +396,156 @@ class AudioLoop:
         while True:
             bytestream = await self.audio_in_queue.get()
             await asyncio.to_thread(stream.write, bytestream)
+
+    def process_tool_calls(self, response):
+        """Process tool calls from the model response."""
+        if hasattr(response, 'tool_calls') and response.tool_calls:
+            print(f"Received tool call: {response.tool_calls}")
+            for tool_call in response.tool_calls:
+                function_name = tool_call.function.name
+                function_args = tool_call.function.arguments
+                print(f"Function called: {function_name} with args: {function_args}")
+                
+                # Execute the appropriate function based on the tool call
+                if function_name == "move_to":
+                    result = self.move_to(**function_args)
+                elif function_name == "move_relative":
+                    result = self.move_relative(**function_args)
+                elif function_name == "grab":
+                    result = self.grab()
+                elif function_name == "drop":
+                    result = self.drop()
+                elif function_name == "home":
+                    result = self.home()
+                elif function_name == "set_movement_speed":
+                    result = self.set_movement_speed(**function_args)
+                else:
+                    result = f"Unknown function: {function_name}"
+                
+                print(f"Function result: {result}")
+                return result
+        return None
+
+    async def receive_audio(self):
+        "Background task to reads from the websocket and write pcm chunks to the output queue"
+        while True:
+            turn = self.session.receive()
+            async for response in turn:
+                print(response)
+                # Check for tool calls
+                tool_result = self.process_tool_calls(response)
+                if tool_result:
+                    print(f"Tool execution result: {tool_result}")
+                
+                if data := response.data:
+                    self.audio_in_queue.put_nowait(data)
+                    continue
+                
+                if text := response.text:
+                    print("Text received!")
+                    print(text)
+
+            # If you interrupt the model, it sends a turn_complete.
+            # For interruptions to work, we need to stop playback.
+            # So empty out the audio queue because it may have loaded
+            # much more audio than has played yet.
+            while not self.audio_in_queue.empty():
+                self.audio_in_queue.get_nowait()
+    
     async def run(self):
         try:
+            print("Starting with tools configuration...")
+            
             async with (
                 client.aio.live.connect(
                     model=MODEL, 
-                    
                     # system_instruction=SYSTEM_INSTRUCTION,  # Added system instruction
-                    config=types.LiveConnectConfig(
+                        config=types.LiveConnectConfig(
+                        
                         response_modalities=["TEXT"], 
+                          tool_config=types.ToolConfig(
+        function_calling_config=types.FunctionCallingConfig(mode='ANY')
+    ),
                         tools=[
-                            types.FunctionDeclaration(
-                                name="move_to",
-                                description="Move the arm to x, y, z coordinates.",
-                                parameters={
-                                    "type": "object",
-                                    "properties": {
-                                        "x": {"type": "number", "description": "X coordinate"},
-                                        "y": {"type": "number", "description": "Y coordinate"},
-                                        "z": {"type": "number", "description": "Z coordinate"},
-                                    },
-                                    "required": ["x", "y", "z"],
-                                },
-                            ), 
-                            types.FunctionDeclaration(
-                                name="move_relative",
-                                description="Move the arm relative to its current position.",
-                                parameters={
-                                    "type": "object",
-                                    "properties": {
-                                        "dx": {"type": "number", "description": "X offset"},
-                                        "dy": {"type": "number", "description": "Y offset"},
-                                        "dz": {"type": "number", "description": "Z offset"},
-                                    },
-                                    "required": ["dx", "dy", "dz"],
-                                },
-                            ), 
-                            types.FunctionDeclaration(
-                                name="grab",
-                                description="Pick up an object at the current position.",
-                                parameters={},
-                            ), 
-                            types.FunctionDeclaration(
-                                name="drop",
-                                description="Release the currently held object.",
-                                parameters={},
-                            ), 
-                            types.FunctionDeclaration(
-                                name="home",
-                                description="Return the arm to its home position.",
-                                parameters={},
-                            ), 
-                            types.FunctionDeclaration(
-                                name="set_movement_speed",
-                                description="Set the movement speed and acceleration for the arm.",
-                                parameters={
-                                    "type": "object",
-                                    "properties": {
-                                        "velocity": {"type": "number", "description": "Movement velocity"},
-                                        "acceleration": {"type": "number", "description": "Movement acceleration"},
-                                    },
-                                    "required": ["velocity", "acceleration"],
-                                },
-                            ),
+                            
+                            
+                            # types.FunctionDeclaration(
+                            #     name="move_to",
+                            #     description="Move the arm to x, y, z coordinates.",
+                            #     parameters={
+                            #         "type": "object",
+                            #         "properties": {
+                            #             "x": {"type": "number", "description": "X coordinate"},
+                            #             "y": {"type": "number", "description": "Y coordinate"},
+                            #             "z": {"type": "number", "description": "Z coordinate"},
+                            #         },
+                            #         "required": [],  # Made parameters optional
+                            #     },
+                            # ), 
+                            # types.FunctionDeclaration(
+                            #     name="move_relative",
+                            #     description="Move the arm relative to its current position.",
+                            #     parameters={
+                            #         "type": "object",
+                            #         "properties": {
+                            #             "dx": {"type": "number", "description": "X offset"},
+                            #             "dy": {"type": "number", "description": "Y offset"},
+                            #             "dz": {"type": "number", "description": "Z offset"},
+                            #         },
+                            #         "required": [],  # Made parameters optional
+                            #     },
+                            # ), 
+                            # types.FunctionDeclaration(
+                            #     name="grab",
+                            #     description="Pick up an object at the current position.",
+                            #     parameters={
+                            #         "type": "object",
+                            #         "properties": {},
+                            #     },
+                            # ), 
+                            # types.FunctionDeclaration(
+                            #     name="drop",
+                            #     description="Release the currently held object.",
+                            #     parameters={
+                            #         "type": "object",
+                            #         "properties": {},
+                            #     },
+                            # ), 
+                            # types.FunctionDeclaration(
+                            #     name="home",
+                            #     description="Return the arm to its home position.",
+                            #     parameters={
+                            #         "type": "object",
+                            #         "properties": {},
+                            #     },
+                            # ), 
+    
+                            # types.FunctionDeclaration(
+                        #         name="set_movement_speed",
+                        #         description="Set the movement speed and acceleration for the arm.",
+                        #         parameters={
+                        #             "type": "object",
+                        #             "properties": {
+                        #                 "velocity": {"type": "number", "description": "Movement velocity"},
+                        #                 "acceleration": {"type": "number", "description": "Movement acceleration"},
+                        #             },
+                        #             "required": [],  # Made parameters optional
+                        #         },
+                        #     ),
                         ],
                     )
                 ) as session, 
                 asyncio.TaskGroup() as tg,
             ):
+                print("Session connected successfully with tools configured")
                 self.session = session
 
                 self.audio_in_queue = asyncio.Queue()
                 self.out_queue = asyncio.Queue(maxsize=5)
 
+                # Test the tools by sending a message to prompt tool usage
+                await session.send(input="This is a test. Please use the tools to move the robot arm to position x=10, y=20, z=30.", end_of_turn=True)
+                
                 send_text_task = tg.create_task(self.send_text())
                 tg.create_task(self.send_realtime())
                 tg.create_task(self.listen_audio())
@@ -488,7 +565,6 @@ class AudioLoop:
         except ExceptionGroup as EG:
             self.audio_stream.close()
             traceback.print_exception(EG)
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
