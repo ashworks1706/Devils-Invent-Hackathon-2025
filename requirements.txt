@@ -4,3 +4,7 @@ python-dotenv
 SpeechRecognition 
 pyttsx3
 PyAudio
+opencv-python
+pillow 
+mss
+pyaudio

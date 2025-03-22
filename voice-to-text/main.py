@@ -2,7 +2,6 @@ import google.generativeai as genai
 from google.ai.generativelanguage_v1beta.types import content
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 import asyncio
-from google import genai as genai_vertex
 import os
 import speech_recognition as sr
 import pyttsx3
