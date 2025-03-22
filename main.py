@@ -1,4 +1,5 @@
 
+# sudo chmod 666 /dev/ttyACM0
 
 # Add this import at the top
 import numpy as np
@@ -192,8 +193,11 @@ class AudioLoop:
             # causing the audio pipeline to overflow if you don't to_thread it.
             try:
                 cap = await asyncio.to_thread(
-                    cv2.VideoCapture, 0
-                )  # 0 represents the default camera
+                    # cv2.VideoCapture, "/dev/video1"
+                    # integrated camera
+                    # external camera
+                    cv2.VideoCapture, "/dev/video4"
+                )  
                 print("Camera initialized successfully")
             except Exception as e:
                 print(f"Error initializing camera: {e}")
@@ -344,7 +348,7 @@ class AudioLoop:
         while True:
             turn = self.session.receive()
             async for response in turn:
-                print("RAW RESPONSE : ",text)
+                print(response)
                 if data := response.data:
                     self.audio_in_queue.put_nowait(data)
                     continue
