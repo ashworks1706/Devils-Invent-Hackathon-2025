@@ -99,6 +99,7 @@ class AudioLoop:
         robot.set_movement_speed(velocity=velocity, acceleration=acceleration)
         return f"Movement speed set to velocity={velocity}, acceleration={acceleration}"
     # Movement functions
+    
     def move_to(self, x=None, y=None, z=None):
         """Move to absolute coordinates"""
         # Update only the provided coordinates
@@ -364,7 +365,10 @@ class AudioLoop:
         commands = {
             "move to": self.move_to,
             "grab": self.grab,
-            "drop": self.drop
+            "drop": self.drop,
+            "move relative": self.move_relative,
+            "home": self.home,
+            "set movement speed": self.set_movement_speed
         }
         
         result_text = text
@@ -373,36 +377,60 @@ class AudioLoop:
         
         # Check for commands with coordinates
         for cmd, func in commands.items():
-            # Pattern: command with optional coordinates
-            pattern = fr"{cmd}(?: to coordinates? ?\((-?\d+)(?:,|\s+)?\s*(-?\d+)\)| by ?\((-?\d+)(?:,|\s+)?\s*(-?\d+)\)| to x=(-?\d+)[ ,]*y=(-?\d+)| by x=(-?\d+)[ ,]*y=(-?\d+))?"
-            
-            matches = re.finditer(pattern, text, re.IGNORECASE)
-            for match in matches:
-                # Extract coordinates from any of the possible capture groups
-                x = y = None
-                for i in range(1, 9, 2):  # Check odd indices for x values
-                    if match.group(i) and match.group(i).isdigit():
-                        x = int(match.group(i))
-                        break
-                        
-                for i in range(2, 9, 2):  # Check even indices for y values
-                    if match.group(i) and match.group(i).isdigit():
-                        y = int(match.group(i))
-                        break
-                
-                # Execute the command
-                response = func(x, y)
-                # Replace the command in the text with the response
-                result_text = result_text.replace(match.group(0), f"[{response}]", 1)
+            if cmd == "set movement speed":
+                # Special pattern for set_movement_speed
+                pattern = r"set movement speed(?:[:\s]+velocity=(\d+)(?:,?\s+acceleration=(\d+))?|[:\s]+(\d+)(?:,?\s+(\d+))?)"
+                matches = re.finditer(pattern, text, re.IGNORECASE)
+                for match in matches:
+                    velocity = match.group(1) or match.group(3)
+                    acceleration = match.group(2) or match.group(4)
+                    
+                    velocity = int(velocity) if velocity else 10
+                    acceleration = int(acceleration) if acceleration else 10
+                    
+                    response = func(velocity, acceleration)
+                    result_text = result_text.replace(match.group(0), f"[{response}]", 1)
+            elif cmd in ["move to", "move relative"]:
+                # Pattern for 3D coordinates
+                pattern = fr"{cmd}(?:\s+to|\s+by)?(?:\s+coordinates?\s*\((-?\d+(?:\.\d+)?)(?:,?\s*)(-?\d+(?:\.\d+)?)(?:,?\s*)(-?\d+(?:\.\d+)?)?\)|\s+x=(-?\d+(?:\.\d+)?)(?:,?\s*)y=(-?\d+(?:\.\d+)?)(?:,?\s*)z=(-?\d+(?:\.\d+)?)?)"
+                matches = re.finditer(pattern, text, re.IGNORECASE)
+                for match in matches:
+                    # Extract coordinates from either group format (1,2,3) or (4,5,6)
+                    x = float(match.group(1) or match.group(4)) if (match.group(1) or match.group(4)) else None
+                    y = float(match.group(2) or match.group(5)) if (match.group(2) or match.group(5)) else None
+                    z = float(match.group(3) or match.group(6)) if (match.group(3) or match.group(6)) else None
+                    
+                    response = func(x, y, z)
+                    result_text = result_text.replace(match.group(0), f"[{response}]", 1)
+            elif cmd in ["grab", "drop"]:
+                # Pattern for grab/drop with optional coordinates
+                pattern = fr"{cmd}(?:\s+at\s+coordinates?\s*\((-?\d+(?:\.\d+)?)(?:,?\s*)(-?\d+(?:\.\d+)?)(?:,?\s*)(-?\d+(?:\.\d+)?)?\)|\s+at\s+x=(-?\d+(?:\.\d+)?)(?:,?\s*)y=(-?\d+(?:\.\d+)?)(?:,?\s*)z=(-?\d+(?:\.\d+)?)?)"
+                matches = re.finditer(pattern, text, re.IGNORECASE)
+                for match in matches:
+                    x = float(match.group(1) or match.group(4)) if (match.group(1) or match.group(4)) else None
+                    y = float(match.group(2) or match.group(5)) if (match.group(2) or match.group(5)) else None
+                    z = float(match.group(3) or match.group(6)) if (match.group(3) or match.group(6)) else None
+                    
+                    response = func(x, y, z)
+                    result_text = result_text.replace(match.group(0), f"[{response}]", 1)
         
         # Check for simple commands without coordinates
-        for cmd, func in commands.items():
-            if cmd in text.lower() and cmd not in result_text.lower():
-                response = func()
-                # Add the response to the text
-                result_text += f"\n[{response}]"
-                
+        simple_patterns = {
+            "home": r"\bhome\b",
+            "grab": r"\bgrab\b",
+            "drop": r"\bdrop\b"
+        }
+        
+        for cmd, pattern in simple_patterns.items():
+            if cmd in commands and re.search(pattern, text, re.IGNORECASE):
+                # Make sure it's not already replaced
+                if f"[{commands[cmd].__name__}" not in result_text:
+                    response = commands[cmd]()
+                    # Add the response to the text
+                    result_text += f"\n[{response}]"
+                    
         return result_text
+
 
     async def play_audio(self):
         stream = await asyncio.to_thread(
