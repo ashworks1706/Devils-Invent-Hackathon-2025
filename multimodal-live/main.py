@@ -61,7 +61,7 @@ MODEL = "models/gemini-2.0-flash-exp"
 
 DEFAULT_MODE = "camera"
 
-client = genai.Client(api_key='',http_options={"api_version": "v1alpha"})
+client = genai.Client(api_key='AIzaSyAmE4CWdWDsaea26wCC5lSYGYzAosWDi0I',http_options={"api_version": "v1alpha"})
 
 # While Gemini 2.0 Flash is in experimental preview mode, only one of AUDIO or
 # TEXT may be passed here.
@@ -81,10 +81,6 @@ Always confirm actions by describing what you're doing.
 """
 
 # Update the CONFIG to include the system instruction
-CONFIG = {
-    "response_modalities": ["AUDIO"],
-    "system_instruction": SYSTEM_INSTRUCTION
-}
 
 
 pya = pyaudio.PyAudio()
@@ -218,7 +214,6 @@ class AudioLoop:
                 try:
                     # Get frame for processing
                     ret, frame = await asyncio.to_thread(cap.read)
-                    print("Frame read")
                     if not ret:
                         print("Failed to capture frame")
                         break
@@ -230,7 +225,6 @@ class AudioLoop:
                     # Display the frame
                     # await asyncio.to_thread(cv2.imshow, "Camera Feed", frame)
                     cv2.imshow( "Camera Feed", frame)
-                    print("Frame displayed")
                 except Exception as e:
                     print(f"Error displaying frame: {e}")
                 
@@ -246,7 +240,6 @@ class AudioLoop:
 
                     mime_type = "image/jpeg"
                     image_bytes = image_io.read()
-                    print("Frame processed")
                 except Exception as e:
                     print(f"Error processing frame: {e}")
                     continue
@@ -254,7 +247,6 @@ class AudioLoop:
                 try:
                     # Check for key press (q to quit)
                     key = cv2.waitKey(1) & 0xFF
-                    print("Checking for key press")
                     if key == ord('q'):
                         print("User requested exit")
                         break
@@ -264,7 +256,6 @@ class AudioLoop:
                 try:
                     await asyncio.sleep(1.0)
                     await self.out_queue.put({"mime_type": mime_type, "data": base64.b64encode(image_bytes).decode()})
-                    print("Frame sent to model")
                 except Exception as e:
                     print(f"Error sending frame to model: {e}")
                 
@@ -277,7 +268,6 @@ class AudioLoop:
                 if 'cap' in locals():
                     cap.release()
                 cv2.destroyAllWindows()
-                print("Camera resources released")
             except Exception as e:
                 print(f"Error releasing resources: {e}")
 
@@ -385,6 +375,8 @@ class AudioLoop:
         
         result_text = text
         
+        print(text)
+        
         # Check for commands with coordinates
         for cmd, func in commands.items():
             # Pattern: command with optional coordinates
@@ -433,9 +425,11 @@ class AudioLoop:
     async def run(self):
         try:
             async with (
-                client.aio.live.connect(model=MODEL, config=CONFIG) as session,
-                asyncio.TaskGroup() as tg,
-            ):
+                client.aio.live.connect(model=MODEL, config={"response_modalities": ["TEXT"],"system_instruction": SYSTEM_INSTRUCTION
+                                                             
+                                                            #  ,tools : [set_light_values]
+                                                             }
+                                        ) as session, asyncio.TaskGroup() as tg,):
                 self.session = session
 
                 self.audio_in_queue = asyncio.Queue()
