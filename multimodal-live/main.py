@@ -32,16 +32,12 @@ python Get_started_LiveAPI.py --mode screen
 
 # Add this import at the top
 import numpy as np
-
-
-
 import asyncio
 import base64
 import io
 import os
 import sys
 import traceback
-
 import cv2
 import pyaudio
 import PIL.Image
@@ -50,6 +46,7 @@ import mss
 import argparse
 
 from google import genai
+import re
 
 
 FORMAT = pyaudio.paInt16
@@ -68,12 +65,33 @@ client = genai.Client(api_key='',http_options={"api_version": "v1alpha"})
 
 # While Gemini 2.0 Flash is in experimental preview mode, only one of AUDIO or
 # TEXT may be passed here.
-CONFIG = {"response_modalities": ["AUDIO"]}
+SYSTEM_INSTRUCTION = """
+You are an AI assistant controlling a robotic arm. You can help the user by moving the arm and manipulating objects.
+You have these capabilities:
+- move_left(x): Move the arm left by x units (default 1)
+- move_right(x): Move the arm right by x units (default 1)
+- move_forward(y): Move the arm forward by y units (default 1)
+- move_backward(y): Move the arm backward by y units (default 1)
+- grab(): Pick up an object at the current position
+- drop(): Release the currently held object
+
+When asked to perform physical tasks, use these functions by stating the command clearly.
+For example, say "I'll move the arm to the left" or "Let me grab that object for you".
+Always confirm actions by describing what you're doing.
+"""
+
+# Update the CONFIG to include the system instruction
+CONFIG = {
+    "response_modalities": ["AUDIO"],
+    "system_instruction": SYSTEM_INSTRUCTION
+}
+
 
 pya = pyaudio.PyAudio()
 
 
 class AudioLoop:
+    
     def __init__(self, video_mode=DEFAULT_MODE):
         self.video_mode = video_mode
 
@@ -85,6 +103,63 @@ class AudioLoop:
         self.send_text_task = None
         self.receive_audio_task = None
         self.play_audio_task = None
+        
+        # Movement functions and state
+        self.current_position = {"x": 0, "y": 0}
+        self.holding_object = False
+
+    # Movement functions
+    def move_left(self, x=None, y=None):
+        """Move left by specified amount or default step"""
+        amount = x if x is not None else 1
+        self.current_position["x"] -= amount
+        print(f"Moving left to position: {self.current_position}")
+        return f"Moved left to position {self.current_position}"
+        
+    def move_right(self, x=None, y=None):
+        """Move right by specified amount or default step"""
+        amount = x if x is not None else 1
+        self.current_position["x"] += amount
+        print(f"Moving right to position: {self.current_position}")
+        return f"Moved right to position {self.current_position}"
+        
+    def move_forward(self, x=None, y=None):
+        """Move forward by specified amount or default step"""
+        amount = y if y is not None else 1
+        self.current_position["y"] += amount
+        print(f"Moving forward to position: {self.current_position}")
+        return f"Moved forward to position {self.current_position}"
+        
+    def move_backward(self, x=None, y=None):
+        """Move backward by specified amount or default step"""
+        amount = y if y is not None else 1
+        self.current_position["y"] -= amount
+        print(f"Moving backward to position: {self.current_position}")
+        return f"Moved backward to position {self.current_position}"
+        
+    def grab(self, x=None, y=None):
+        """Grab object at current or specified position"""
+        position = {"x": x if x is not None else self.current_position["x"], 
+                   "y": y if y is not None else self.current_position["y"]}
+        if not self.holding_object:
+            self.holding_object = True
+            print(f"Grabbing object at position: {position}")
+            return f"Grabbed object at position {position}"
+        else:
+            print("Already holding an object")
+            return "Already holding an object"
+            
+    def drop(self, x=None, y=None):
+        """Drop held object at current or specified position"""
+        position = {"x": x if x is not None else self.current_position["x"], 
+                   "y": y if y is not None else self.current_position["y"]}
+        if self.holding_object:
+            self.holding_object = False
+            print(f"Dropping object at position: {position}")
+            return f"Dropped object at position {position}"
+        else:
+            print("No object to drop")
+            return "No object to drop"
 
     async def send_text(self):
         while True:
@@ -116,9 +191,6 @@ class AudioLoop:
         mime_type = "image/jpeg"
         image_bytes = image_io.read()
         return {"mime_type": mime_type, "data": base64.b64encode(image_bytes).decode()}
-
-
-
 
     async def get_frames(self):
         try:
@@ -288,7 +360,9 @@ class AudioLoop:
                     self.audio_in_queue.put_nowait(data)
                     continue
                 if text := response.text:
-                    print(text, end="")
+                    # Process commands in the text response
+                    processed_text = self.process_commands(text)
+                    print(processed_text, end="")
 
             # If you interrupt the model, it sends a turn_complete.
             # For interruptions to work, we need to stop playback.
@@ -296,6 +370,53 @@ class AudioLoop:
             # much more audio than has played yet.
             while not self.audio_in_queue.empty():
                 self.audio_in_queue.get_nowait()
+    
+    def process_commands(self, text):
+        """Process text for movement commands and execute them"""
+        # Define command patterns to look for
+        commands = {
+            "move left": self.move_left,
+            "move right": self.move_right,
+            "move forward": self.move_forward,
+            "move backward": self.move_backward,
+            "grab": self.grab,
+            "drop": self.drop
+        }
+        
+        result_text = text
+        
+        # Check for commands with coordinates
+        for cmd, func in commands.items():
+            # Pattern: command with optional coordinates
+            pattern = fr"{cmd}(?: to coordinates? ?\((-?\d+)(?:,|\s+)?\s*(-?\d+)\)| by ?\((-?\d+)(?:,|\s+)?\s*(-?\d+)\)| to x=(-?\d+)[ ,]*y=(-?\d+)| by x=(-?\d+)[ ,]*y=(-?\d+))?"
+            
+            matches = re.finditer(pattern, text, re.IGNORECASE)
+            for match in matches:
+                # Extract coordinates from any of the possible capture groups
+                x = y = None
+                for i in range(1, 9, 2):  # Check odd indices for x values
+                    if match.group(i) and match.group(i).isdigit():
+                        x = int(match.group(i))
+                        break
+                        
+                for i in range(2, 9, 2):  # Check even indices for y values
+                    if match.group(i) and match.group(i).isdigit():
+                        y = int(match.group(i))
+                        break
+                
+                # Execute the command
+                response = func(x, y)
+                # Replace the command in the text with the response
+                result_text = result_text.replace(match.group(0), f"[{response}]", 1)
+        
+        # Check for simple commands without coordinates
+        for cmd, func in commands.items():
+            if cmd in text.lower() and cmd not in result_text.lower():
+                response = func()
+                # Add the response to the text
+                result_text += f"\n[{response}]"
+                
+        return result_text
 
     async def play_audio(self):
         stream = await asyncio.to_thread(
