@@ -192,30 +192,19 @@ class AudioLoop:
         robot.move_relative(x, y, z)
         return f"Moved relatively by ({x}, {y}, {z}) to position ({self.current_position['x']}, {self.current_position['y']}, {self.current_position['z']})"
         
-    def grab(self, x=None, y=None, z=None):
+    def grab(self):
         """Grab object at current or specified position"""
         # Move to position if specified
-        if x is not None or y is not None or z is not None:
-            self.move_to(x, y, z)
             
         print("Grabbing object")
-        # robot.set_gripper(enable=True, grip=True)
-        self.holding_object = True
+        robot.set_gripper(enable=True, grip=True)
         return "Object grabbed successfully"
             
-    def drop(self, x=None, y=None, z=None):
+    def drop(self):
         """Drop held object at current or specified position"""
-        # Move to position if specified
-        if x is not None or y is not None or z is not None:
-            self.move_to(x, y, z)
-            
-        if not self.holding_object:
-            print("No object currently held")
-            return "No object to drop"
-            
+        
         print("Dropping object")
-        # robot.set_gripper(enable=True, grip=False)
-        self.holding_object = False
+        robot.set_gripper(enable=True, grip=False)
         return "Object dropped successfully"
 
     async def send_text(self):
