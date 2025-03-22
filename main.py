@@ -4,6 +4,7 @@
 # Add this import at the top
 import numpy as np
 import asyncio
+from google.genai.types import Content 
 import base64
 import io
 import os
@@ -11,6 +12,7 @@ import sys
 import traceback
 import cv2
 import pyaudio
+from google.genai import types
 import PIL.Image
 import mss
 
@@ -18,16 +20,31 @@ import argparse
 
 from google import genai
 import re
-from dobot_controller import DobotController
+# from dobot_controller import DobotController
 
 # Initialize the robot
-robot = DobotController()
+# robot = DobotController()
 
 # Return home
-robot.home()
+# robot.home()
 
 # Move to a position
 
+# system_instruction=  """
+
+# You are an AI assistant controlling a robotic arm. You can help the user by moving the arm and manipulating objects.
+# You have these capabilities:
+# - move_to(x,y,z): Move the arm to x,y,z coordinates (default 1)
+# - grab(): Pick up an object at the current position
+# - drop(): Release the currently held object
+# - move_relative(dx,dy,dz): Move the arm relative to its current position
+# - home() : Return the arm to its home position
+# - set_movement_speed(velocity, acceleration): Set the movement speed and acceleration for the arm
+
+# When asked to perform physical tasks, use these functions by stating the command clearly.
+# For example, say "I'll move the arm to the left" or "Let me grab that object for you".
+# Always confirm actions by describing what you're doing.
+# """
 
 
 
@@ -90,14 +107,14 @@ class AudioLoop:
     def home(self):
         """Return the robot to its home position"""
         print("Returning to home position")
-        robot.home()
+        # robot.home()
         self.current_position = {"x": 0, "y": 0, "z": 0}
         return "Returned to home position"
     
     def set_movement_speed(self, velocity=10, acceleration=10):
         """Set the movement speed and acceleration for point-to-point movements."""
         print(f"Setting movement speed: velocity={velocity}, acceleration={acceleration}")
-        robot.set_movement_speed(velocity=velocity, acceleration=acceleration)
+        # robot.set_movement_speed(velocity=velocity, acceleration=acceleration)
         return f"Movement speed set to velocity={velocity}, acceleration={acceleration}"
     # Movement functions
     
@@ -113,7 +130,7 @@ class AudioLoop:
             
         print(f"Moving to position: x={self.current_position['x']}, y={self.current_position['y']}, z={self.current_position['z']}")
         # Execute actual robot movement
-        robot.move_to(self.current_position["x"], self.current_position["y"], self.current_position["z"])
+        # robot.move_to(self.current_position["x"], self.current_position["y"], self.current_position["z"])
         return f"Moved to position ({self.current_position['x']}, {self.current_position['y']}, {self.current_position['z']})"
         
     def move_relative(self, dx=0, dy=0, dz=0):
@@ -127,7 +144,7 @@ class AudioLoop:
         print(f"New position: x={self.current_position['x']}, y={self.current_position['y']}, z={self.current_position['z']}")
         
         # Execute actual robot movement
-        robot.move_relative(dx=dx, dy=dy, dz=dz)
+        # robot.move_relative(dx=dx, dy=dy, dz=dz)
         return f"Moved relatively by ({dx}, {dy}, {dz}) to position ({self.current_position['x']}, {self.current_position['y']}, {self.current_position['z']})"
         
     def grab(self, x=None, y=None, z=None):
@@ -137,7 +154,7 @@ class AudioLoop:
             self.move_to(x, y, z)
             
         print("Grabbing object")
-        robot.set_gripper(enable=True, grip=True)
+        # robot.set_gripper(enable=True, grip=True)
         self.holding_object = True
         return "Object grabbed successfully"
             
@@ -152,7 +169,7 @@ class AudioLoop:
             return "No object to drop"
             
         print("Dropping object")
-        robot.set_gripper(enable=True, grip=False)
+        # robot.set_gripper(enable=True, grip=False)
         self.holding_object = False
         return "Object dropped successfully"
 
@@ -164,7 +181,7 @@ class AudioLoop:
             )
             if text.lower() == "q":
                 break
-            await self.session.send(input=text or ".", end_of_turn=True)
+            await self.session.send(input= f"{SYSTEM_INSTRUCTION} User Prompt : {text}" or ".", end_of_turn=True)
 
     def _get_frame(self, cap):
         # Read the frameq
@@ -193,10 +210,10 @@ class AudioLoop:
             # causing the audio pipeline to overflow if you don't to_thread it.
             try:
                 cap = await asyncio.to_thread(
-                    # cv2.VideoCapture, "/dev/video1"
+                    cv2.VideoCapture, "/dev/video0"
                     # integrated camera
                     # external camera
-                    cv2.VideoCapture, "/dev/video4"
+                    # cv2.VideoCapture, "/dev/video4"
                 )  
                 print("Camera initialized successfully")
             except Exception as e:
@@ -352,9 +369,12 @@ class AudioLoop:
                 if data := response.data:
                     self.audio_in_queue.put_nowait(data)
                     continue
+                
                 if text := response.text:
+                    print("text recievede!")
+                    print(text)
                     # Process commands in the text response
-                    processed_text = self.process_commands(text)
+                    # processed_text = self.process_commands(text)
                     # print(processed_text, end="")
 
             # If you interrupt the model, it sends a turn_complete.
@@ -363,79 +383,7 @@ class AudioLoop:
             # much more audio than has played yet.
             while not self.audio_in_queue.empty():
                 self.audio_in_queue.get_nowait()
-    
-    def process_commands(self, text):
-        """Process text for movement commands and execute them"""
-        # Define command patterns to look for
-        commands = {
-            "move to": self.move_to,
-            "grab": self.grab,
-            "drop": self.drop,
-            "move relative": self.move_relative,
-            "home": self.home,
-            "set movement speed": self.set_movement_speed
-        }
-        
-        result_text = text
-        
-        
-        
-        # Check for commands with coordinates
-        for cmd, func in commands.items():
-            if cmd == "set movement speed":
-                # Special pattern for set_movement_speed
-                pattern = r"set movement speed(?:[:\s]+velocity=(\d+)(?:,?\s+acceleration=(\d+))?|[:\s]+(\d+)(?:,?\s+(\d+))?)"
-                matches = re.finditer(pattern, text, re.IGNORECASE)
-                for match in matches:
-                    velocity = match.group(1) or match.group(3)
-                    acceleration = match.group(2) or match.group(4)
-                    
-                    velocity = int(velocity) if velocity else 10
-                    acceleration = int(acceleration) if acceleration else 10
-                    
-                    response = func(velocity, acceleration)
-                    result_text = result_text.replace(match.group(0), f"[{response}]", 1)
-            elif cmd in ["move to", "move relative"]:
-                # Pattern for 3D coordinates
-                pattern = fr"{cmd}(?:\s+to|\s+by)?(?:\s+coordinates?\s*\((-?\d+(?:\.\d+)?)(?:,?\s*)(-?\d+(?:\.\d+)?)(?:,?\s*)(-?\d+(?:\.\d+)?)?\)|\s+x=(-?\d+(?:\.\d+)?)(?:,?\s*)y=(-?\d+(?:\.\d+)?)(?:,?\s*)z=(-?\d+(?:\.\d+)?)?)"
-                matches = re.finditer(pattern, text, re.IGNORECASE)
-                for match in matches:
-                    # Extract coordinates from either group format (1,2,3) or (4,5,6)
-                    x = float(match.group(1) or match.group(4)) if (match.group(1) or match.group(4)) else None
-                    y = float(match.group(2) or match.group(5)) if (match.group(2) or match.group(5)) else None
-                    z = float(match.group(3) or match.group(6)) if (match.group(3) or match.group(6)) else None
-                    
-                    response = func(x, y, z)
-                    result_text = result_text.replace(match.group(0), f"[{response}]", 1)
-            elif cmd in ["grab", "drop"]:
-                # Pattern for grab/drop with optional coordinates
-                pattern = fr"{cmd}(?:\s+at\s+coordinates?\s*\((-?\d+(?:\.\d+)?)(?:,?\s*)(-?\d+(?:\.\d+)?)(?:,?\s*)(-?\d+(?:\.\d+)?)?\)|\s+at\s+x=(-?\d+(?:\.\d+)?)(?:,?\s*)y=(-?\d+(?:\.\d+)?)(?:,?\s*)z=(-?\d+(?:\.\d+)?)?)"
-                matches = re.finditer(pattern, text, re.IGNORECASE)
-                for match in matches:
-                    x = float(match.group(1) or match.group(4)) if (match.group(1) or match.group(4)) else None
-                    y = float(match.group(2) or match.group(5)) if (match.group(2) or match.group(5)) else None
-                    z = float(match.group(3) or match.group(6)) if (match.group(3) or match.group(6)) else None
-                    
-                    response = func(x, y, z)
-                    result_text = result_text.replace(match.group(0), f"[{response}]", 1)
-        
-        # Check for simple commands without coordinates
-        simple_patterns = {
-            "home": r"\bhome\b",
-            "grab": r"\bgrab\b",
-            "drop": r"\bdrop\b"
-        }
-        
-        for cmd, pattern in simple_patterns.items():
-            if cmd in commands and re.search(pattern, text, re.IGNORECASE):
-                # Make sure it's not already replaced
-                if f"[{commands[cmd].__name__}" not in result_text:
-                    response = commands[cmd]()
-                    # Add the response to the text
-                    result_text += f"\n[{response}]"
-                    
-        return result_text
-
+   
 
     async def play_audio(self):
         stream = await asyncio.to_thread(
@@ -448,15 +396,74 @@ class AudioLoop:
         while True:
             bytestream = await self.audio_in_queue.get()
             await asyncio.to_thread(stream.write, bytestream)
-
     async def run(self):
         try:
             async with (
-                client.aio.live.connect(model=MODEL, config={"response_modalities": ["TEXT"],"system_instruction": SYSTEM_INSTRUCTION
-                                                             
-                                                            #  ,tools : [set_light_values]
-                                                             }
-                                        ) as session, asyncio.TaskGroup() as tg,):
+                client.aio.live.connect(
+                    model=MODEL, 
+                    
+                    # system_instruction=SYSTEM_INSTRUCTION,  # Added system instruction
+                    config=types.LiveConnectConfig(
+                        response_modalities=["TEXT"], 
+                        tools=[
+                            types.FunctionDeclaration(
+                                name="move_to",
+                                description="Move the arm to x, y, z coordinates.",
+                                parameters={
+                                    "type": "object",
+                                    "properties": {
+                                        "x": {"type": "number", "description": "X coordinate"},
+                                        "y": {"type": "number", "description": "Y coordinate"},
+                                        "z": {"type": "number", "description": "Z coordinate"},
+                                    },
+                                    "required": ["x", "y", "z"],
+                                },
+                            ), 
+                            types.FunctionDeclaration(
+                                name="move_relative",
+                                description="Move the arm relative to its current position.",
+                                parameters={
+                                    "type": "object",
+                                    "properties": {
+                                        "dx": {"type": "number", "description": "X offset"},
+                                        "dy": {"type": "number", "description": "Y offset"},
+                                        "dz": {"type": "number", "description": "Z offset"},
+                                    },
+                                    "required": ["dx", "dy", "dz"],
+                                },
+                            ), 
+                            types.FunctionDeclaration(
+                                name="grab",
+                                description="Pick up an object at the current position.",
+                                parameters={},
+                            ), 
+                            types.FunctionDeclaration(
+                                name="drop",
+                                description="Release the currently held object.",
+                                parameters={},
+                            ), 
+                            types.FunctionDeclaration(
+                                name="home",
+                                description="Return the arm to its home position.",
+                                parameters={},
+                            ), 
+                            types.FunctionDeclaration(
+                                name="set_movement_speed",
+                                description="Set the movement speed and acceleration for the arm.",
+                                parameters={
+                                    "type": "object",
+                                    "properties": {
+                                        "velocity": {"type": "number", "description": "Movement velocity"},
+                                        "acceleration": {"type": "number", "description": "Movement acceleration"},
+                                    },
+                                    "required": ["velocity", "acceleration"],
+                                },
+                            ),
+                        ],
+                    )
+                ) as session, 
+                asyncio.TaskGroup() as tg,
+            ):
                 self.session = session
 
                 self.audio_in_queue = asyncio.Queue()
