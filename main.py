@@ -29,23 +29,8 @@ robot = DobotController()
 # Return home
 robot.home()
 
-# Move to a position
-
-# system_instruction=  """
-
-# You are an AI assistant controlling a robotic arm. You can help the user by moving the arm and manipulating objects.
-# You have these capabilities:
-# - move_to(x,y,z): Move the arm to x,y,z coordinates (default 1)
-# - grab(): Pick up an object at the current position
-# - drop(): Release the currently held object
-# - move_relative(x,y,z): Move the arm relative to its current position
-# - home() : Return the arm to its home position
-# - set_movement_speed(velocity, acceleration): Set the movement speed and acceleration for the arm
-
-# When asked to perform physical tasks, use these functions by stating the command clearly.
-# For example, say "I'll move the arm to the left" or "Let me grab that object for you".
-# Always confirm actions by describing what you're doing.
-# """
+MAX_Z = 200
+MIN_Z = -200
 
 
 
@@ -66,14 +51,10 @@ client = genai.Client(api_key='AIzaSyAR_4Nk8x9jq2rl4FIZ6v4OudZSuwvYyDg',http_opt
 # While Gemini 2.0 Flash is in experimental preview mode, only one of AUDIO or
 # TEXT may be passed here.
 SYSTEM_INSTRUCTION = """
-You are an AI assistant controlling a robotic arm. You can help the user by moving the arm and manipulating objects.
+You are an AI assistant controlling a robotic arm. You can help the user by moving the arm and manipulating objects. You have to follow the grid on the background to identify where to move. The scripts are hard coded so you just have to identify the object and use your function for relative position from the board.
 You have these capabilities:
-- move_to(x,y,z): Move the arm to x,y,z coordinates (default 1)
-- grab(): Pick up an object at the current position
-- drop(): Release the currently held object
-- move_relative(x,y,z): Move the arm relative to its current position
-- home() : Return the arm to its home position
-- set_movement_speed(velocity, acceleration): Set the movement speed and acceleration for the arm
+- pickup_from(pos): Move the arm to pos coordinate (eg. A5, D5, etc) and grab
+- drop_to(pos): Move the arm relative to pos coordinate (eg. A5, D5, etc) and drop
 
 When asked to perform physical tasks, use these functions by stating the command clearly.
 For example, say "I'll move the arm to the left" or "Let me grab that object for you".
@@ -83,61 +64,26 @@ RESPONSE ONLY IN JSON FORMAT
 
 FOLLOW THIS GUIDELINE FOR THE JSON FORMAT. ALL ARGUMENTS ARE REQUIRED.
 
-1. move_to function :
+1. pickup_from function :
 ```json
 {
-    "function": "move_to",
+    "function": "pickup_from",
     "arguments": {
-        "x": 10,
-        "y": 20,
-        "z": 30
+        "pos": "D5",
     }
 }
 ```
-2. move_relative function :
+2. drop_to function :
 ```json
 {
-    "function": "move_relative",
+    "function": "drop_to",
     "arguments": {
-        "x": 10,
-        "y": 20,
-        "z": 30
+        "pos": "D2,
     }
 }
 ```
 
 """
-# 3. grab function :
-# ``` json
-# {
-#     "function": "grab",
-#     "arguments": {}
-# }
-# ```
-# 4. drop function :
-# ```json
-# {
-#     "function": "drop",
-#     "arguments": {}
-# }
-# ```
-# 5. home function :
-
-# {
-#     "function": "home",
-#     "arguments": {}
-# }
-# 6. set_movement_speed function :
-# {
-#     "function": "set_movement_speed",
-#     "arguments": {
-#         "velocity": 10,
-#         "acceleration": 10
-#     }
-# }
-
-# Update the CONFIG to include the system instruction
-
 
 pya = pyaudio.PyAudio()
 
@@ -155,57 +101,66 @@ class AudioLoop:
         self.send_text_task = None
         self.receive_audio_task = None
         self.play_audio_task = None
-        
-        # Movement functions and state with 3D coordinates
-        self.current_position = {"x": 0, "y": 0, "z": 0}
+        self.coordinates={}
         self.holding_object = False
-        print("Robot initialized with position:", self.current_position)
 
     def home(self):
         """Return the robot to its home position"""
         print("Returning to home position")
-        # robot.home()
-        self.current_position = {"x": 0, "y": 0, "z": 0}
+        robot.home()
         return "Returned to home position"
     
-    def set_movement_speed(self, velocity=10, acceleration=10):
-        """Set the movement speed and acceleration for point-to-point movements."""
-        print(f"Setting movement speed: velocity={velocity}, acceleration={acceleration}")
-        # robot.set_movement_speed(velocity=velocity, acceleration=acceleration)
-        return f"Movement speed set to velocity={velocity}, acceleration={acceleration}"
-    # Movement functions
     
-    def move_to(self,x : float, y: float, z : float):
-        """Move to absolute coordinates"""
+    def pickup_from(self, pos: str):
+        """Move to relative pos coordinates"""
             
-        print(f"Moving to position: x={x}, y={y}, z={z}")
-        # Execute actual robot movement
-        robot.move_to(x, y, z)
-        return f"Moving to position: x={x}, y={y}, z={z}"
+        # map pos coordinate
         
-    def move_relative(self,x : float, y :float, z :float):
-        """Move the robot relative to its current position."""
-                
-        print(f"Moving relatively: x={x}, y={y}, z={z}")
+        x,y,z = self.coordinates[pos]
         
-        # Execute actual robot movement
-        robot.move_relative(x, y, z)
-        return f"Moved relatively by ({x}, {y}, {z}) to position ({self.current_position['x']}, {self.current_position['y']}, {self.current_position['z']})"
+        print(f"Moving on X axis: x={x}, y={y} for pickup")
         
-    def grab(self):
-        """Grab object at current or specified position"""
-        # Move to position if specified
-            
+        # move to the position
+        
+        robot.move_to(x, y, MAX_Z)
+        
+        print(f"Dropping on z axis: z={z} for pickup ")
+        
+        # drop towards the object to pick up
+        
+        robot.move_to(x, y, MIN_Z)
+        
         print("Grabbing object")
-        robot.set_gripper(enable=True, grip=True)
-        return "Object grabbed successfully"
-            
-    def drop(self):
-        """Drop held object at current or specified position"""
         
-        print("Dropping object")
+        robot.set_gripper(enable=True, grip=True)
+        
+        return f"Moved to position: {pos} and grabbed object "
+        
+    def drop_to(self,pos:str):
+        """Move to relative pos coordinates"""
+            
+        # map pos coordinate
+        
+        x,y,z = self.coordinates[pos]
+        
+        print(f"Moving on X axis: x={x}, y={y} for dropoff")
+        
+        # move to the position
+        
+        robot.move_to(x, y, MAX_Z)
+        
+        print(f"Dropping on z axis: z={z} for dropoff ")
+        
+        # drop towards the object to pick up
+        
+        robot.move_to(x, y, MIN_Z)
+        
+        print("Grabbing object")
+        
         robot.set_gripper(enable=True, grip=False)
-        return "Object dropped successfully"
+        
+        return f"Moved to position: {pos} and grabbed object "
+        
 
     async def send_text(self):
         while True:
@@ -422,9 +377,6 @@ class AudioLoop:
                 response_text = response_text[4:].strip()  # Remove 'json' prefix
 
             try:
-                print("balls")
-                print(response_text)
-                print("balls")
                 tool_call = json.loads(response_text)  # Convert JSON string to dictionary
                 function_name = tool_call.get("function")
                 function_args = tool_call.get("arguments", {})
@@ -432,20 +384,10 @@ class AudioLoop:
                 print(f"Debug: Function called: {function_name} with args: {function_args}")
                 
                 # Execute the appropriate function based on the tool call
-                if function_name == "move_to":
-                    print("executing move_to",function_args)
-                    result = self.move_to(function_args["x"], function_args["y"], function_args["z"])
-                elif function_name == "move_relative":
-                    print("executing move_relative",function_args)
-                    result = self.move_relative(function_args["x"], function_args["y"], function_args["z"])
-                elif function_name == "grab":
-                    result = self.grab()
-                elif function_name == "drop":
-                    result = self.drop()
-                elif function_name == "home":
-                    result = self.home()
-                elif function_name == "set_movement_speed":
-                    result = self.set_movement_speed(**function_args)
+                if function_name == "pickup_from":
+                    result = self.pickup_from(function_args["pos"])
+                elif function_name == "drop_to":
+                    result = self.drop_to(function_args["pos"])
                 else:
                     result = f"Unknown function: {function_name}"
                 
@@ -465,15 +407,15 @@ class AudioLoop:
                 print("Response received")  
                 # # Check for tool calls
                 tool_result = self.process_tool_calls(response)
-                # if tool_result:
-                #     print(f"Tool execution result: {tool_result}")
+                if tool_result:
+                    print(f"Tool execution result: {tool_result}")
                 
-                # if data := response.data:
-                #     self.audio_in_queue.put_nowait(data)
-                #     continue
+                if data := response.data:
+                    self.audio_in_queue.put_nowait(data)
+                    continue
                 
-                # if text := response.text:
-                #     print("Text received!")
+                if text := response.text:
+                    print("Text received!")
 
             while not self.audio_in_queue.empty():
                 self.audio_in_queue.get_nowait()
@@ -489,7 +431,7 @@ class AudioLoop:
                     response_modalities=["TEXT"],
                             system_instruction=types.Content(parts=[{"text": SYSTEM_INSTRUCTION}]),  
                         tools=[
-                        self.move_to, self.move_relative
+                        self.pickup_from, self.drop_to
                         ],
                     )
                 ) as session, 

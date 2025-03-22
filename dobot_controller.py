@@ -20,9 +20,12 @@ class DobotController:
             raise ConnectionError("Failed to connect to Dobot robot")
         
         # Set default movement parameters
-        self.set_movement_speed(velocity=100, acceleration=100)
+        self.set_movement_speed(velocity=150, acceleration=140)
         self.segment_size = 10  # Size of each movement segment in mm
         self.interpolation_points = 5  # Number of points to interpolate between segments
+        
+        # Initialize continuous trajectory parameters for smoother movements
+        self.bot.set_continous_trajectory_params(150, 150, 150)
         
     def set_movement_speed(self, velocity: float = 100, acceleration: float = 100):
         """Set the movement speed and acceleration for point-to-point movements.
@@ -37,6 +40,8 @@ class DobotController:
             coordinate_acceleration=acceleration,
             effector_acceleration=acceleration
         )
+        # Also update continuous trajectory parameters
+        self.bot.set_continous_trajectory_params(acceleration, velocity, acceleration)
     
     def _generate_trajectory(self, start_pos: Tuple[float, float, float, float], 
                            end_pos: Tuple[float, float, float, float]) -> List[Tuple[float, float, float, float]]:
@@ -114,7 +119,7 @@ class DobotController:
             sleep(1)  # Wait for movement to complete
     
     def move_relative(self, dx: float, dy: float, dz: float, dr: float = 0, wait: bool = True):
-        """Move the robot relative to its current position.
+        """Move the robot relative to its current position using continuous trajectory for smoother motion.
         
         Args:
             dx: Change in X coordinate (mm)
@@ -124,13 +129,78 @@ class DobotController:
             wait: Whether to wait for movement to complete
         """
         current_pos = self.get_position()
-        self.move_to(
-            x=current_pos[0] + dx,
-            y=current_pos[1] + dy,
-            z=current_pos[2] + dz,
-            r=current_pos[3] + dr,
-            wait=wait
-        )
+        target_x = current_pos[0] + dx
+        target_y = current_pos[1] + dy
+        target_z = current_pos[2] + dz
+        target_r = current_pos[3] + dr
+        
+        # For very small movements, use direct point-to-point
+        if abs(dx) < 5 and abs(dy) < 5 and abs(dz) < 5:
+            self.bot.set_point_to_point_command(mode=0, x=target_x, y=target_y, z=target_z, r=target_r)
+            if wait:
+                sleep(0.5)
+            return
+            
+        # For larger movements, use continuous trajectory for smoothness
+        # Stop the queue first
+        self.bot.stop_queue()
+        self.bot.clear_queue()
+        
+        # Generate a path with more intermediate points for smoother motion
+        path_points = 10
+        path = []
+        
+        for i in range(path_points + 1):
+            t = i / path_points
+            # Apply easing function for acceleration/deceleration
+            if t < 0.5:
+                # Accelerate (ease in)
+                ease = 2 * t * t
+            else:
+                # Decelerate (ease out)
+                ease = 1 - pow(-2 * t + 2, 2) / 2
+                
+            x = current_pos[0] + dx * ease
+            y = current_pos[1] + dy * ease
+            z = current_pos[2] + dz * ease
+            
+            path.append([x, y, z])
+        
+        # Execute the smooth path
+        queue_index = None
+        for point in path:
+            queue_index = self.bot.set_continous_trajectory_command(1, point[0], point[1], point[2], 50)
+            
+        # Start queue execution
+        self.bot.start_queue()
+        
+        if wait:
+            # Wait for movement to complete using a queue index check
+            self._wait_for_queue(queue_index)
+            
+        # Set rotation separately if needed
+        if abs(dr) > 0:
+            self.bot.set_point_to_point_command(mode=0, x=target_x, y=target_y, z=target_z, r=target_r)
+            if wait:
+                sleep(0.5)
+    
+    def _wait_for_queue(self, queue_index=None):
+        """Wait for the queue to complete execution.
+        
+        Args:
+            queue_index: The queue index to wait for completion
+        """
+        # Add a zero wait command as a non-operation to bypass queue limitations
+        self.bot.wait(0)
+        
+        if queue_index is None:
+            queue_index = self.bot.get_current_queue_index()
+            
+        while True:
+            current_index = self.bot.get_current_queue_index()
+            if current_index > queue_index:
+                break
+            sleep(0.2)  # Check more frequently for more responsive behavior
     
     def get_position(self) -> Tuple[float, float, float, float]:
         """Get the current position of the robot.
