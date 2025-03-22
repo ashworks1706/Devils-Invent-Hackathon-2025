@@ -20,13 +20,14 @@ import argparse
 
 from google import genai
 import re
-# from dobot_controller import DobotController
+import json
+from dobot_controller import DobotController
 
 # Initialize the robot
-# robot = DobotController()
+robot = DobotController()
 
 # Return home
-# robot.home()
+robot.home()
 
 # Move to a position
 
@@ -37,7 +38,7 @@ import re
 # - move_to(x,y,z): Move the arm to x,y,z coordinates (default 1)
 # - grab(): Pick up an object at the current position
 # - drop(): Release the currently held object
-# - move_relative(dx,dy,dz): Move the arm relative to its current position
+# - move_relative(x,y,z): Move the arm relative to its current position
 # - home() : Return the arm to its home position
 # - set_movement_speed(velocity, acceleration): Set the movement speed and acceleration for the arm
 
@@ -60,7 +61,7 @@ MODEL = "models/gemini-2.0-flash-exp"
 
 DEFAULT_MODE = "camera"
 
-client = genai.Client(api_key='AIzaSyAmE4CWdWDsaea26wCC5lSYGYzAosWDi0I',http_options={"api_version": "v1alpha"})
+client = genai.Client(api_key='AIzaSyAR_4Nk8x9jq2rl4FIZ6v4OudZSuwvYyDg',http_options={"api_version": "v1alpha"})
 
 # While Gemini 2.0 Flash is in experimental preview mode, only one of AUDIO or
 # TEXT may be passed here.
@@ -70,14 +71,70 @@ You have these capabilities:
 - move_to(x,y,z): Move the arm to x,y,z coordinates (default 1)
 - grab(): Pick up an object at the current position
 - drop(): Release the currently held object
-- move_relative(dx,dy,dz): Move the arm relative to its current position
+- move_relative(x,y,z): Move the arm relative to its current position
 - home() : Return the arm to its home position
 - set_movement_speed(velocity, acceleration): Set the movement speed and acceleration for the arm
 
 When asked to perform physical tasks, use these functions by stating the command clearly.
 For example, say "I'll move the arm to the left" or "Let me grab that object for you".
 Always confirm actions by describing what you're doing.
+
+RESPONSE ONLY IN JSON FORMAT
+
+FOLLOW THIS GUIDELINE FOR THE JSON FORMAT. ALL ARGUMENTS ARE REQUIRED.
+
+1. move_to function :
+```json
+{
+    "function": "move_to",
+    "arguments": {
+        "x": 10,
+        "y": 20,
+        "z": 30
+    }
+}
+```
+2. move_relative function :
+```json
+{
+    "function": "move_relative",
+    "arguments": {
+        "x": 10,
+        "y": 20,
+        "z": 30
+    }
+}
+```
+
 """
+# 3. grab function :
+# ``` json
+# {
+#     "function": "grab",
+#     "arguments": {}
+# }
+# ```
+# 4. drop function :
+# ```json
+# {
+#     "function": "drop",
+#     "arguments": {}
+# }
+# ```
+# 5. home function :
+
+# {
+#     "function": "home",
+#     "arguments": {}
+# }
+# 6. set_movement_speed function :
+# {
+#     "function": "set_movement_speed",
+#     "arguments": {
+#         "velocity": 10,
+#         "acceleration": 10
+#     }
+# }
 
 # Update the CONFIG to include the system instruction
 
@@ -118,34 +175,22 @@ class AudioLoop:
         return f"Movement speed set to velocity={velocity}, acceleration={acceleration}"
     # Movement functions
     
-    def move_to(self, x=None, y=None, z=None):
+    def move_to(self,x : float, y: float, z : float):
         """Move to absolute coordinates"""
-        # Update only the provided coordinates
-        if x is not None:
-            self.current_position["x"] = x
-        if y is not None:
-            self.current_position["y"] = y
-        if z is not None:
-            self.current_position["z"] = z
             
-        print(f"Moving to position: x={self.current_position['x']}, y={self.current_position['y']}, z={self.current_position['z']}")
+        print(f"Moving to position: x={x}, y={y}, z={z}")
         # Execute actual robot movement
-        # robot.move_to(self.current_position["x"], self.current_position["y"], self.current_position["z"])
-        return f"Moved to position ({self.current_position['x']}, {self.current_position['y']}, {self.current_position['z']})"
+        robot.move_to(x, y, z)
+        return f"Moving to position: x={x}, y={y}, z={z}"
         
-    def move_relative(self, dx=0, dy=0, dz=0):
+    def move_relative(self,x : float, y :float, z :float):
         """Move the robot relative to its current position."""
-        # Calculate new position
-        self.current_position["x"] += dx
-        self.current_position["y"] += dy
-        self.current_position["z"] += dz
-        
-        print(f"Moving relatively: dx={dx}, dy={dy}, dz={dz}")
-        print(f"New position: x={self.current_position['x']}, y={self.current_position['y']}, z={self.current_position['z']}")
+                
+        print(f"Moving relatively: x={x}, y={y}, z={z}")
         
         # Execute actual robot movement
-        # robot.move_relative(dx=dx, dy=dy, dz=dz)
-        return f"Moved relatively by ({dx}, {dy}, {dz}) to position ({self.current_position['x']}, {self.current_position['y']}, {self.current_position['z']})"
+        robot.move_relative(x, y, z)
+        return f"Moved relatively by ({x}, {y}, {z}) to position ({self.current_position['x']}, {self.current_position['y']}, {self.current_position['z']})"
         
     def grab(self, x=None, y=None, z=None):
         """Grab object at current or specified position"""
@@ -181,7 +226,7 @@ class AudioLoop:
             )
             if text.lower() == "q":
                 break
-            await self.session.send(input= f"{SYSTEM_INSTRUCTION} User Prompt : {text}" or ".", end_of_turn=True)
+            await self.session.send(input= f"User Prompt : {text}", end_of_turn=True)
 
     def _get_frame(self, cap):
         # Read the frameq
@@ -210,10 +255,10 @@ class AudioLoop:
             # causing the audio pipeline to overflow if you don't to_thread it.
             try:
                 cap = await asyncio.to_thread(
-                    cv2.VideoCapture, "/dev/video0"
+                    # cv2.VideoCapture, "/dev/video0"
                     # integrated camera
                     # external camera
-                    # cv2.VideoCapture, "/dev/video4"
+                    cv2.VideoCapture, "/dev/video4"
                 )  
                 print("Camera initialized successfully")
             except Exception as e:
@@ -342,6 +387,7 @@ class AudioLoop:
             await self.session.send(input=msg)
 
     async def listen_audio(self):
+        print("Listening for audio...")
         mic_info = pya.get_default_input_device_info()
         self.audio_stream = await asyncio.to_thread(
             pya.open,
@@ -360,31 +406,6 @@ class AudioLoop:
             data = await asyncio.to_thread(self.audio_stream.read, CHUNK_SIZE, **kwargs)
             await self.out_queue.put({"data": data, "mime_type": "audio/pcm"})
 
-    async def receive_audio(self):
-        "Background task to reads from the websocket and write pcm chunks to the output queue"
-        while True:
-            turn = self.session.receive()
-            async for response in turn:
-                print(response)
-                if data := response.data:
-                    self.audio_in_queue.put_nowait(data)
-                    continue
-                
-                if text := response.text:
-                    print("text recievede!")
-                    print(text)
-                    # Process commands in the text response
-                    # processed_text = self.process_commands(text)
-                    # print(processed_text, end="")
-
-            # If you interrupt the model, it sends a turn_complete.
-            # For interruptions to work, we need to stop playback.
-            # So empty out the audio queue because it may have loaded
-            # much more audio than has played yet.
-            while not self.audio_in_queue.empty():
-                self.audio_in_queue.get_nowait()
-   
-
     async def play_audio(self):
         stream = await asyncio.to_thread(
             pya.open,
@@ -399,18 +420,35 @@ class AudioLoop:
 
     def process_tool_calls(self, response):
         """Process tool calls from the model response."""
-        if hasattr(response, 'tool_calls') and response.tool_calls:
-            print(f"Received tool call: {response.tool_calls}")
-            for tool_call in response.tool_calls:
-                function_name = tool_call.function.name
-                function_args = tool_call.function.arguments
-                print(f"Function called: {function_name} with args: {function_args}")
+        try:
+            if not response.text:
+                print("Debug: Response text is None or empty.")
+                return None
+
+            print(f"Debug: Processing response text for tool calls... Response text: {response.text}")
+            
+            # Clean up and normalize the response text
+            response_text = response.text.strip().strip('`')  # Remove all backticks
+            if response_text.lower().startswith('json'):
+                response_text = response_text[4:].strip()  # Remove 'json' prefix
+
+            try:
+                print("balls")
+                print(response_text)
+                print("balls")
+                tool_call = json.loads(response_text)  # Convert JSON string to dictionary
+                function_name = tool_call.get("function")
+                function_args = tool_call.get("arguments", {})
+                print(type(function_args))
+                print(f"Debug: Function called: {function_name} with args: {function_args}")
                 
                 # Execute the appropriate function based on the tool call
                 if function_name == "move_to":
-                    result = self.move_to(**function_args)
+                    print("executing move_to",function_args)
+                    result = self.move_to(function_args["x"], function_args["y"], function_args["z"])
                 elif function_name == "move_relative":
-                    result = self.move_relative(**function_args)
+                    print("executing move_relative",function_args)
+                    result = self.move_relative(function_args["x"], function_args["y"], function_args["z"])
                 elif function_name == "grab":
                     result = self.grab()
                 elif function_name == "drop":
@@ -422,36 +460,35 @@ class AudioLoop:
                 else:
                     result = f"Unknown function: {function_name}"
                 
-                print(f"Function result: {result}")
+                print(f"Debug: Function result: {result}")
                 return result
-        return None
-
+            except json.JSONDecodeError as json_e:
+                print(f"Debug: Error parsing response text as JSON: {json_e}")
+        except Exception as e:
+            print(f"Error processing response text: {e}")
+            return None
+        
     async def receive_audio(self):
         "Background task to reads from the websocket and write pcm chunks to the output queue"
+        print("recieveing video")
         while True:
-            turn = self.session.receive()
-            async for response in turn:
-                print(response)
-                # Check for tool calls
+            async for response in self.session.receive():
+                print("Response received")  
+                # # Check for tool calls
                 tool_result = self.process_tool_calls(response)
-                if tool_result:
-                    print(f"Tool execution result: {tool_result}")
+                # if tool_result:
+                #     print(f"Tool execution result: {tool_result}")
                 
-                if data := response.data:
-                    self.audio_in_queue.put_nowait(data)
-                    continue
+                # if data := response.data:
+                #     self.audio_in_queue.put_nowait(data)
+                #     continue
                 
-                if text := response.text:
-                    print("Text received!")
-                    print(text)
+                # if text := response.text:
+                #     print("Text received!")
 
-            # If you interrupt the model, it sends a turn_complete.
-            # For interruptions to work, we need to stop playback.
-            # So empty out the audio queue because it may have loaded
-            # much more audio than has played yet.
             while not self.audio_in_queue.empty():
                 self.audio_in_queue.get_nowait()
-    
+                
     async def run(self):
         try:
             print("Starting with tools configuration...")
@@ -459,79 +496,11 @@ class AudioLoop:
             async with (
                 client.aio.live.connect(
                     model=MODEL, 
-                    # system_instruction=SYSTEM_INSTRUCTION,  # Added system instruction
                         config=types.LiveConnectConfig(
-                        
-                        response_modalities=["TEXT"], 
-                          tool_config=types.ToolConfig(
-        function_calling_config=types.FunctionCallingConfig(mode='ANY')
-    ),
+                    response_modalities=["TEXT"],
+                            system_instruction=types.Content(parts=[{"text": SYSTEM_INSTRUCTION}]),  
                         tools=[
-                            
-                            
-                            # types.FunctionDeclaration(
-                            #     name="move_to",
-                            #     description="Move the arm to x, y, z coordinates.",
-                            #     parameters={
-                            #         "type": "object",
-                            #         "properties": {
-                            #             "x": {"type": "number", "description": "X coordinate"},
-                            #             "y": {"type": "number", "description": "Y coordinate"},
-                            #             "z": {"type": "number", "description": "Z coordinate"},
-                            #         },
-                            #         "required": [],  # Made parameters optional
-                            #     },
-                            # ), 
-                            # types.FunctionDeclaration(
-                            #     name="move_relative",
-                            #     description="Move the arm relative to its current position.",
-                            #     parameters={
-                            #         "type": "object",
-                            #         "properties": {
-                            #             "dx": {"type": "number", "description": "X offset"},
-                            #             "dy": {"type": "number", "description": "Y offset"},
-                            #             "dz": {"type": "number", "description": "Z offset"},
-                            #         },
-                            #         "required": [],  # Made parameters optional
-                            #     },
-                            # ), 
-                            # types.FunctionDeclaration(
-                            #     name="grab",
-                            #     description="Pick up an object at the current position.",
-                            #     parameters={
-                            #         "type": "object",
-                            #         "properties": {},
-                            #     },
-                            # ), 
-                            # types.FunctionDeclaration(
-                            #     name="drop",
-                            #     description="Release the currently held object.",
-                            #     parameters={
-                            #         "type": "object",
-                            #         "properties": {},
-                            #     },
-                            # ), 
-                            # types.FunctionDeclaration(
-                            #     name="home",
-                            #     description="Return the arm to its home position.",
-                            #     parameters={
-                            #         "type": "object",
-                            #         "properties": {},
-                            #     },
-                            # ), 
-    
-                            # types.FunctionDeclaration(
-                        #         name="set_movement_speed",
-                        #         description="Set the movement speed and acceleration for the arm.",
-                        #         parameters={
-                        #             "type": "object",
-                        #             "properties": {
-                        #                 "velocity": {"type": "number", "description": "Movement velocity"},
-                        #                 "acceleration": {"type": "number", "description": "Movement acceleration"},
-                        #             },
-                        #             "required": [],  # Made parameters optional
-                        #         },
-                        #     ),
+                        self.move_to, self.move_relative
                         ],
                     )
                 ) as session, 
@@ -539,12 +508,11 @@ class AudioLoop:
             ):
                 print("Session connected successfully with tools configured")
                 self.session = session
-
+# 
                 self.audio_in_queue = asyncio.Queue()
                 self.out_queue = asyncio.Queue(maxsize=5)
 
                 # Test the tools by sending a message to prompt tool usage
-                await session.send(input="This is a test. Please use the tools to move the robot arm to position x=10, y=20, z=30.", end_of_turn=True)
                 
                 send_text_task = tg.create_task(self.send_text())
                 tg.create_task(self.send_realtime())
