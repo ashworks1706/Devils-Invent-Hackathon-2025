@@ -1,0 +1,6 @@
+google-generativeai
+python-dotenv
+SpeechRecognition 
+pyttsx3
+PyAudio
+google-genai
