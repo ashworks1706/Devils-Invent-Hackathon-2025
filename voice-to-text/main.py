@@ -3,8 +3,6 @@ from google.ai.generativelanguage_v1beta.types import content
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 import asyncio
 from google import genai as genai_vertex
-from google.genai import types
-from google.genai.types import Tool, GenerateContentConfig, GoogleSearch
 import os
 import speech_recognition as sr
 import pyttsx3
@@ -192,15 +190,17 @@ async def process_voice_command(command: str):
         engine.runAndWait()
 
 
-def get_voice_input():
+async def get_voice_input():
     """Capture voice input from microphone"""
     print("🎤 Capturing voice input...")
     r = sr.Recognizer()
     with sr.Microphone() as source:
         print("🎤 Listening...")
-        audio = r.listen(source, timeout=5)
+        r.adjust_for_ambient_noise(source)  # Adjust for ambient noise
+        loop = asyncio.get_event_loop()
+        audio = await loop.run_in_executor(None, r.listen, source, 5)
         try:
-            text = r.recognize_google(audio)
+            text = await loop.run_in_executor(None, r.recognize_google, audio)
             print(f"🎤 You said: {text}")
             return text
         except sr.UnknownValueError:
@@ -216,7 +216,7 @@ async def main():
     print("Say 'exit' to quit\n")
     
     while True:
-        command = get_voice_input().lower()
+        command = (await get_voice_input()).lower()
         print(f"🔍 Received command: {command}")
         
         if not command:
