@@ -59,13 +59,17 @@ RESPONSE ONLY IN JSON FORMAT WHEN REQUIRED
 
 FOLLOW THIS GUIDELINE FOR THE JSON FORMAT. ALL ARGUMENTS ARE REQUIRED.
 
+THE PARAMETERS FOR pickup_from_to function are:
+pickup_pos: int
+dropoff_pos: int
+
 1. pickup_from_to function :
 ```json
 {
     "function": "pickup_from_to",
     "arguments": {
-        "pickup_pos": "D5",
-        "dropoff_pos": "D2"
+        "pickup_pos": "1",
+        "dropoff_pos": "90"
     }
 }
 ```
@@ -113,7 +117,7 @@ class AudioLoop:
         y = grid_1[1] + (grid_index // 18) * (grid_90[1] - grid_1[1]) / 5
         return (x, y)
         
-    async def pickup_from_to(self, pickup_pos: str, dropoff_pos: str):
+    async def pickup_from_to(self, pickup_pos: int, dropoff_pos: int):
         """Move to relative pos coordinates and pickup then drop to position"""
             
         await self.speak_text(f"Moving on to {pickup_pos} for pickup and dropped to {dropoff_pos}")
