@@ -19,6 +19,7 @@ from google import genai
 import re
 import json
 from dobot_controller import DobotController
+import speech_recognition as sr
 
 
 # Initialize the robot
@@ -28,10 +29,8 @@ robot = DobotController()
 robot.home()
 
 MAX_Z = 200
-MIN_Z = -25
+MIN_Z = -20
 
-global paused
-paused = False
 
 
 FORMAT = pyaudio.paInt16
@@ -51,19 +50,19 @@ client = genai.Client(api_key='AIzaSyAR_4Nk8x9jq2rl4FIZ6v4OudZSuwvYyDg',http_opt
 # While Gemini 2.0 Flash is in experimental preview mode, only one of AUDIO or
 # TEXT may be passed here.
 SYSTEM_INSTRUCTION = """
-You are an AI assistant controlling a robotic arm. You can help the user by moving the arm and manipulating objects. You have to follow the grid on the background to identify where to move. 
+You are an AI assistant EVE controlling a robotic arm. You can help the user by moving the arm and manipulating objects. You have to follow the grid on the background to identify where to move. 
+
 
 The scripts are hard coded so you just have to identify the object and use your function for relative position from the board.
 
+
 You have these capabilities:
-- pickup_from_to(pickup_pos, dropoff_pos): Move the arm to pickup position coordinate (eg. A5, D5, etc), grab object and drop at dropoff position coordinate (eg. A5, D5, etc).
+- pickup_from_to(pickup_pos, dropoff_pos): Move the arm to pickup position coordinate (eg. 1, 20, etc), grab object and drop at dropoff position coordinate (eg. 1, 20, etc).
 - home(): Return the robot to its home position and cancel any operations.
 
 When asked to perform physical tasks, use these functions by stating the command clearly.
 
-RESPONSE ONLY IN JSON FORMAT WHEN REQUIRED FOR FUNCTION
-
-
+RESPONSE ONLY IN JSON FORMAT WHEN REQUIRED
 
 FOLLOW THIS GUIDELINE FOR THE JSON FORMAT. ALL ARGUMENTS ARE REQUIRED.
 
@@ -71,7 +70,6 @@ THE PARAMETERS FOR pickup_from_to function are:
 pickup_pos: int
 dropoff_pos: int
 
-For example index 18 is bottom left corner and center is 45. Find the desired object and use the index for pickup and dropoff positions. 
 
 1. pickup_from_to function :
 ```json
@@ -91,7 +89,7 @@ For example index 18 is bottom left corner and center is 45. Find the desired ob
 }
 ```
 
-IF THE USER DOES NOT ASK ANYTHING TO DO. DO NOT DO ANYTHING UNTIL TOLD.
+DO NOT EXECUTE ANY FUNCTION UNTIL USER
 
 """
 
@@ -108,10 +106,12 @@ class AudioLoop:
 
         self.session = None
 
-        self.recieve_response_task = None
+        self.receive_audio_task = None
         self.play_audio_task = None
         self.coordinates={}
         self.holding_object = False
+        self.recognizer = sr.Recognizer()
+        self.is_processing = False
 
     async def home(self):
         """Return the robot to its home position"""
@@ -266,7 +266,7 @@ class AudioLoop:
                     cv2.putText(frame, f"Zoom Y: {zoom_factor_y:.2f}", (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
                     cv2.putText(frame, f"Offset X: {offset_x_manual}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
                     cv2.putText(frame, f"Offset Y: {offset_y_manual}", (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
-                    cv2.putText(frame, f"Rotation: {rotation_angle}°", (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+                    cv2.putText(frame, f"Rotation: {rotation_angle}Â°", (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
                     # Display the frame
                     cv2.imshow("Camera Feed", frame)
                 except Exception as e:
@@ -323,10 +323,8 @@ class AudioLoop:
             await self.session.send(input=msg)
 
     async def listen_audio(self):
-        print("Listening for audio...")
-        global paused
-        if paused:
-            return
+        """Listen for audio and only process commands that start with 'EVE'"""
+        print("Listening for keyword 'EVE'...")
         mic_info = pya.get_default_input_device_info()
         self.audio_stream = await asyncio.to_thread(
             pya.open,
@@ -337,13 +335,52 @@ class AudioLoop:
             input_device_index=mic_info["index"],
             frames_per_buffer=CHUNK_SIZE,
         )
+
+        # Keep robot at home position when idle
+        await self.home()
+
         if __debug__:
             kwargs = {"exception_on_overflow": False}
         else:
             kwargs = {}
+
         while True:
-            data = await asyncio.to_thread(self.audio_stream.read, CHUNK_SIZE, **kwargs)
-            await self.out_queue.put({"data": data, "mime_type": "audio/pcm"})
+            try:
+                # Convert audio chunk to numpy array for processing
+                data = await asyncio.to_thread(self.audio_stream.read, CHUNK_SIZE, **kwargs)
+                audio_data = np.frombuffer(data, dtype=np.int16)
+
+                # Convert to audio format that speech recognition can process
+                audio = sr.AudioData(data, SEND_SAMPLE_RATE, 2)
+                
+                # Try to recognize speech
+                try:
+                    text = await asyncio.to_thread(self.recognizer.recognize_google, audio)
+                    text = text.lower()
+                    
+                    # Check if command starts with "eve"
+                    if text.startswith("eve"):
+                        print("Keyword 'EVE' detected!")
+                        # Extract the command (everything after "eve")
+                        command = text[4:].strip()  # Skip "eve" and any following space
+                        
+                        if command:
+                            print(f"Processing command: {command}")
+                            # Only send to model if we have a command
+                            await self.out_queue.put({"data": data, "mime_type": "audio/pcm"})
+                            await self.speak_text("Processing your command")
+                        else:
+                            await self.speak_text("Waiting for your command")
+                    
+                except sr.UnknownValueError:
+                    # Speech was unintelligible
+                    pass
+                except sr.RequestError as e:
+                    print(f"Could not request results; {e}")
+                    
+            except Exception as e:
+                print(f"Error in listen_audio: {e}")
+                await asyncio.sleep(0.1)  # Prevent tight loop on error
 
     async def speak_text(self, text: str):
         """Speak out the given text string."""
@@ -394,7 +431,7 @@ class AudioLoop:
             print(f"Error processing response text: {e}")
             return None
         
-    async def recieve_response(self):
+    async def receive_audio(self):
         "Background task to reads from the websocket and write pcm chunks to the output queue"
         print("receiving video")
         # Flag to track if a tool is currently executing
@@ -406,19 +443,15 @@ class AudioLoop:
                 # Check for tool calls
                 if not self.is_tool_executing:
                     tool_result = await self.process_tool_calls(response)
-                    global paused
-                    paused = True
                     if tool_result:
                         print(f"Tool execution result: {tool_result}")
                         self.is_tool_executing = True
                         
                         # Pass the function result back to Gemini
-                        await self.session.send(input=f"Function called, System generated function result: {tool_result}\nIF THE USER DOES NOT ASK ANYTHING TO DO. DO NOT DO ANYTHING UNTIL TOLD.", end_of_turn=True)
+                        await self.session.send(input=f"Function called, System generated function result: {tool_result}", end_of_turn=True)
                         
                         # Reset the flag after sending the result
                         self.is_tool_executing = False
-                        paused = False
-                        continue
                 
                 if data := response.data:
                     self.audio_in_queue.put_nowait(data)
@@ -433,6 +466,7 @@ class AudioLoop:
     async def run(self):
         try:
             print("Starting with tools configuration...")
+            print("Listening for keyword 'EVE'. Say 'EVE' followed by your command.")
             
             async with (
                 client.aio.live.connect(
@@ -457,9 +491,10 @@ class AudioLoop:
                 # Test the tools by sending a message to prompt tool usage
                 send_realtime_task = tg.create_task(self.send_realtime())
                 listen_audio_task = tg.create_task(self.listen_audio())
-                tg.create_task(self.get_frames())
+                if self.video_mode == "camera":
+                    tg.create_task(self.get_frames())
 
-                tg.create_task(self.recieve_response())
+                tg.create_task(self.receive_audio())
 
 
                 await send_realtime_task
@@ -483,5 +518,3 @@ if __name__ == "__main__":
     args = parser.parse_args()
     main = AudioLoop(video_mode=args.mode)
     asyncio.run(main.run())
-    
-    
