@@ -14,7 +14,7 @@ import mss
 import time
 import argparse
 import pyttsx3
-
+from time import sleep
 from google import genai
 import re
 import json
@@ -27,7 +27,7 @@ robot = DobotController()
 robot.home()
 
 MAX_Z = 200
-MIN_Z = 0
+MIN_Z = -20
 
 
 
@@ -48,7 +48,12 @@ client = genai.Client(api_key='AIzaSyAR_4Nk8x9jq2rl4FIZ6v4OudZSuwvYyDg',http_opt
 # While Gemini 2.0 Flash is in experimental preview mode, only one of AUDIO or
 # TEXT may be passed here.
 SYSTEM_INSTRUCTION = """
-You are an AI assistant controlling a robotic arm. You can help the user by moving the arm and manipulating objects. You have to follow the grid on the background to identify where to move. The scripts are hard coded so you just have to identify the object and use your function for relative position from the board.
+You are an AI assistant controlling a robotic arm. You can help the user by moving the arm and manipulating objects. You have to follow the grid on the background to identify where to move. 
+
+
+The scripts are hard coded so you just have to identify the object and use your function for relative position from the board.
+
+
 You have these capabilities:
 - pickup_from_to(pickup_pos, dropoff_pos): Move the arm to pickup position coordinate (eg. A5, D5, etc), grab object and drop at dropoff position coordinate (eg. A5, D5, etc).
 - home(): Return the robot to its home position and cancel any operations.
@@ -62,6 +67,8 @@ FOLLOW THIS GUIDELINE FOR THE JSON FORMAT. ALL ARGUMENTS ARE REQUIRED.
 THE PARAMETERS FOR pickup_from_to function are:
 pickup_pos: int
 dropoff_pos: int
+
+For example index 18 is bottom left corner and center is 45. Find the desired object and use the index for pickup and dropoff positions. 
 
 1. pickup_from_to function :
 ```json
@@ -110,8 +117,8 @@ class AudioLoop:
     
     def get_coordinates(self, grid_index: int):
         """Get the coordinates of the grid"""
-        grid_1 = (280, -125)
-        grid_90 = (300, 220)
+        grid_1 = (250, -170)  
+        grid_90 = (330, 160) 
         
         # Grid dimensions
         cols = 18
@@ -148,8 +155,8 @@ class AudioLoop:
         await self.speak_text("Grabbing object")
         
         robot.set_gripper(enable=True, grip=True)
+        sleep(2)
         
-        time.sleep(1)
         robot.home()
         
         x,y = self.get_coordinates(int(dropoff_pos))
@@ -157,9 +164,8 @@ class AudioLoop:
         await self.speak_text(f"Moving on X axis: x={x}, y={y} for dropoff")
         
         robot.move_to(x, y, MAX_Z, wait=True)
-        time.sleep(1)
                 
-        robot.move_to(x, y, MIN_Z, wait=True)
+        robot.move_to(x, y, MIN_Z + 20, wait=True)
         
         await self.speak_text("Dropping object")
         
@@ -203,13 +209,9 @@ class AudioLoop:
 
     async def get_frames(self):
         try:
-            # This takes about a second, and will block the whole program
-            # causing the audio pipeline to overflow if you don't to_thread it.
+            # Initialize the camera
             try:
                 cap = await asyncio.to_thread(
-                    # cv2.VideoCapture, "/dev/video0"
-                    # integrated camera
-                    # external camera
                     cv2.VideoCapture, "/dev/video4"
                 )  
                 print("Camera initialized successfully")
@@ -238,9 +240,63 @@ class AudioLoop:
                     break
                     
                 try:
+                    # Add grid overlay with adjustable parameters
+                    height, width, _ = frame.shape
+                    rows, cols = 5, 18
+                    
+                    # Define separate zoom factors for x and y axes
+                    zoom_factor_x = 0.85  # Zoom level for x axis
+                    zoom_factor_y = 2.4  # Zoom level for y axis
+                    offset_x_manual = 25 # Manual X offset adjustment
+                    offset_y_manual = 0  # Manual Y offset adjustment
+                    rotation_angle = 1.8  # Rotation angle in degrees
+                    
+                    # Calculate the ROI dimensions with separate zoom factors
+                    roi_width = int(width / zoom_factor_x)
+                    roi_height = int(height / zoom_factor_y)
+                    
+                    # Calculate offsets to zoom from center
+                    offset_x = (width - roi_width) // 2 + offset_x_manual
+                    offset_y = (height - roi_height) // 2 + offset_y_manual
+                    
+                    # Adjust cell dimensions for zoomed area
+                    cell_height = roi_height // rows
+                    cell_width = roi_width // cols
+                    
+                    # Calculate rotation center (center of image)
+                    rotation_center = (width // 2, height // 2)
+                    
+                    # Apply rotation if needed
+                    if rotation_angle != 0:
+                        # Get rotation matrix
+                        M = cv2.getRotationMatrix2D(rotation_center, rotation_angle, 1.0)
+                        # Apply rotation to frame
+                        frame = cv2.warpAffine(frame, M, (width, height))
+                    
+                    # Draw grid lines
+                    for i in range(rows + 1):
+                        y = offset_y + i * cell_height
+                        cv2.line(frame, (offset_x, y), (offset_x + roi_width, y), (0, 0, 255), 1)
+                    for j in range(cols + 1):
+                        x = offset_x + j * cell_width
+                        cv2.line(frame, (x, offset_y), (x, offset_y + roi_height), (0, 0, 255), 1)
+
+                    # Add grid numbers
+                    for i in range(rows):
+                        for j in range(cols):
+                            grid_index = (rows - i - 1) * cols + (cols - j)
+                            x = offset_x + j * cell_width + 5
+                            y = offset_y + i * cell_height + 20
+                            cv2.putText(frame, f"{grid_index}", (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                    
+                    # Draw adjustment parameters on screen for reference
+                    cv2.putText(frame, f"Zoom X: {zoom_factor_x:.2f}", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+                    cv2.putText(frame, f"Zoom Y: {zoom_factor_y:.2f}", (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+                    cv2.putText(frame, f"Offset X: {offset_x_manual}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+                    cv2.putText(frame, f"Offset Y: {offset_y_manual}", (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+                    cv2.putText(frame, f"Rotation: {rotation_angle}°", (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
                     # Display the frame
-                    # await asyncio.to_thread(cv2.imshow, "Camera Feed", frame)
-                    cv2.imshow( "Camera Feed", frame)
+                    cv2.imshow("Camera Feed", frame)
                 except Exception as e:
                     print(f"Error displaying frame: {e}")
                 
