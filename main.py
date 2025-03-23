@@ -573,10 +573,10 @@ class AudioLoop:
                 await self.home()
                 
             else:
-                if  "Eve" in response.text or not "Eeve" in response.text or not "Eevee" in response.text:    
-                    await self.speak_text(response.text)
-                else:
-                    print(response.text)
+                # if  "Eve" in response.text or not "Eeve" in response.text or not "Eevee" in response.text:    
+                await self.speak_text(response.text)
+                # else:
+                print(response.text)
             
                 
                 
