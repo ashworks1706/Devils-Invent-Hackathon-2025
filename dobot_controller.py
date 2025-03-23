@@ -79,7 +79,7 @@ class DobotController:
         """
         trajectory = self._generate_trajectory(start_pos, end_pos)
         for pos in trajectory:
-            self.bot.set_point_to_point_command(mode=0, x=pos[0], y=pos[1], z=pos[2], r=pos[3])
+            self.bot.set_point_to_point_command(mode=2, x=pos[0], y=pos[1], z=pos[2], r=pos[3])
             if wait:
                 sleep(0.1)  # Small delay between interpolated points
     
@@ -136,7 +136,7 @@ class DobotController:
         
         # For very small movements, use direct point-to-point
         if abs(dx) < 5 and abs(dy) < 5 and abs(dz) < 5:
-            self.bot.set_point_to_point_command(mode=0, x=target_x, y=target_y, z=target_z, r=target_r)
+            self.bot.set_point_to_point_command(mode=2, x=target_x, y=target_y, z=target_z, r=target_r)
             if wait:
                 sleep(0.5)
             return
@@ -180,7 +180,7 @@ class DobotController:
             
         # Set rotation separately if needed
         if abs(dr) > 0:
-            self.bot.set_point_to_point_command(mode=0, x=target_x, y=target_y, z=target_z, r=target_r)
+            self.bot.set_point_to_point_command(mode=2, x=target_x, y=target_y, z=target_z, r=target_r)
             if wait:
                 sleep(0.5)
     
