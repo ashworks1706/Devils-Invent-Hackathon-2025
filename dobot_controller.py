@@ -113,10 +113,10 @@ class DobotController:
         intermediate_point = [mid_x, mid_y, mid_z, mid_r]
         
         # Execute arc movement through intermediate point
-        self.bot.set_arc_command(intermediate_point, target_pos)
+        queue_index = self.bot.set_arc_command(intermediate_point, target_pos)
         
         if wait:
-            sleep(1)  # Wait for movement to complete
+            self._wait_for_queue(queue_index)  # Wait for movement to complete using queue index
     
     def move_relative(self, dx: float, dy: float, dz: float, dr: float = 0, wait: bool = True):
         """Move the robot relative to its current position using continuous trajectory for smoother motion.
