@@ -20,6 +20,7 @@ import re
 import json
 from dobot_controller import DobotController
 
+
 # Initialize the robot
 robot = DobotController()
 
@@ -103,7 +104,6 @@ class AudioLoop:
 
         self.session = None
 
-        self.send_text_task = None
         self.receive_audio_task = None
         self.play_audio_task = None
         self.coordinates={}
@@ -174,39 +174,7 @@ class AudioLoop:
         robot.home()
         return f"Picked up object from position : {pickup_pos} and  dropped the object to position: {dropoff_pos}"
         
-        
-
-    async def send_text(self):
-        while True:
-            text = await asyncio.to_thread(
-                input,
-                "message > ",
-            )
-            if text.lower() == "q":
-                break
-            await self.session.send(input= f"User Prompt : {text}", end_of_turn=True)
-
-    def _get_frame(self, cap):
-        # Read the frameq
-        ret, frame = cap.read()
-        # Check if the frame was read successfully
-        if not ret:
-            return None
-        # Fix: Convert BGR to RGB color space
-        # OpenCV captures in BGR but PIL expects RGB format
-        # This prevents the blue tint in the video feed
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        img = PIL.Image.fromarray(frame_rgb)  # Now using RGB frame
-        img.thumbnail([1024, 1024])
-
-        image_io = io.BytesIO()
-        img.save(image_io, format="jpeg")
-        image_io.seek(0)
-
-        mime_type = "image/jpeg"
-        image_bytes = image_io.read()
-        return {"mime_type": mime_type, "data": base64.b64encode(image_bytes).decode()}
-
+    
     async def get_frames(self):
         try:
             # Initialize the camera
@@ -328,6 +296,8 @@ class AudioLoop:
                 try:
                     await asyncio.sleep(1.0)
                     await self.out_queue.put({"mime_type": mime_type, "data": base64.b64encode(image_bytes).decode()})
+                    
+                    
                 except Exception as e:
                     print(f"Error sending frame to model: {e}")
                 
@@ -342,41 +312,6 @@ class AudioLoop:
                 cv2.destroyAllWindows()
             except Exception as e:
                 print(f"Error releasing resources: {e}")
-
-    async def get_screen(self):
-        # Create a window to display the screen capture
-        cv2.namedWindow("Screen Capture", cv2.WINDOW_NORMAL)
-        
-        while True:
-            # Get screen capture
-            sct = mss.mss()
-            monitor = sct.monitors[0]
-            screenshot = await asyncio.to_thread(sct.grab, monitor)
-            
-            # Convert to numpy array for display
-            img_np = np.array(screenshot)
-            img_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGBA2BGR)
-            
-            # Display the frame
-            await asyncio.to_thread(cv2.imshow, "Screen Capture", img_bgr)
-            
-            # Process for sending to model
-            image_io = io.BytesIO()
-            PIL.Image.fromarray(screenshot).save(image_io, format="jpeg")
-            image_io.seek(0)
-
-            mime_type = "image/jpeg"
-            image_bytes = image_io.read()
-            
-            # Check for key press (q to quit)
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord('q'):
-                break
-
-            await asyncio.sleep(1.0)
-            await self.out_queue.put({"mime_type": mime_type, "data": base64.b64encode(image_bytes).decode()})
-        
-        cv2.destroyAllWindows()
 
     async def send_realtime(self):
         while True:
@@ -402,18 +337,6 @@ class AudioLoop:
         while True:
             data = await asyncio.to_thread(self.audio_stream.read, CHUNK_SIZE, **kwargs)
             await self.out_queue.put({"data": data, "mime_type": "audio/pcm"})
-
-    async def play_audio(self):
-        stream = await asyncio.to_thread(
-            pya.open,
-            format=FORMAT,
-            channels=CHANNELS,
-            rate=RECEIVE_SAMPLE_RATE,
-            output=True,
-        )
-        while True:
-            bytestream = await self.audio_in_queue.get()
-            await asyncio.to_thread(stream.write, bytestream)
 
     async def speak_text(self, text: str):
         """Speak out the given text string."""
@@ -518,22 +441,17 @@ class AudioLoop:
                 self.is_tool_executing = False  # Initialize tool execution flag
 # 
                 self.audio_in_queue = asyncio.Queue()
-                self.out_queue = asyncio.Queue(maxsize=1)
+                self.out_queue = asyncio.Queue(maxsize=2)
 
                 # Test the tools by sending a message to prompt tool usage
-                
-                # send_text_task = tg.create_task(self.send_text())
                 send_realtime_task = tg.create_task(self.send_realtime())
                 listen_audio_task = tg.create_task(self.listen_audio())
                 if self.video_mode == "camera":
                     tg.create_task(self.get_frames())
-                elif self.video_mode == "screen":
-                    tg.create_task(self.get_screen())
 
                 tg.create_task(self.receive_audio())
-                tg.create_task(self.play_audio())
 
-                # await send_text_task
+
                 await send_realtime_task
                 raise asyncio.CancelledError("User requested exit")
 
@@ -550,7 +468,7 @@ if __name__ == "__main__":
         type=str,
         default=DEFAULT_MODE,
         help="pixels to stream from",
-        choices=["camera", "screen", "none"],
+        choices=["camera", "none"],
     )
     args = parser.parse_args()
     main = AudioLoop(video_mode=args.mode)
