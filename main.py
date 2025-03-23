@@ -19,7 +19,25 @@ from google import genai
 import re
 import json
 from dobot_controller import DobotController
+import logging
+from datetime import datetime
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s | %(levelname)8s | %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
+
+# Add file handler for debugging
+debug_file = f'robot_debug_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
+file_handler = logging.FileHandler(debug_file)
+file_handler.setLevel(logging.DEBUG)
+file_handler.setFormatter(logging.Formatter(
+    '%(asctime)s | %(levelname)8s | %(message)s'
+))
+logger.addHandler(file_handler)
 
 # Initialize the robot
 robot = DobotController()
@@ -99,6 +117,7 @@ pya = pyaudio.PyAudio()
 class AudioLoop:
     
     def __init__(self, video_mode=DEFAULT_MODE):
+        logger.info("Initializing AudioLoop with video mode: %s", video_mode)
         self.video_mode = video_mode
 
         self.audio_in_queue = None
@@ -110,11 +129,18 @@ class AudioLoop:
         self.play_audio_task = None
         self.coordinates={}
         self.holding_object = False
+        # Initialize pyttsx3 engine here
+        self.engine = pyttsx3.init()
+        self.engine.setProperty('rate', 150)  # Adjust speaking rate
+        self.engine.setProperty('volume', 0.9)  # Adjust volume (0.0 to 1.0)
+
 
     async def home(self):
         """Return the robot to its home position"""
+        logger.info("Returning robot to home position")
         await self.speak_text("Cancelling positions and Returning to home position")
         robot.home()
+        logger.debug("Home position reached")
         return "Cancelled operations and Returned to home position"
     
     def get_coordinates(self, grid_index: int):
@@ -149,7 +175,7 @@ class AudioLoop:
         
         x,y = self.get_coordinates(int(pickup_pos))
         
-        await self.speak_text(f"Moving on X axis: x={x}, y={y} for pickup")
+        await self.speak_text(f"Moving to {pickup_pos} for pickup")
         robot.move_to(x, y, MAX_Z, wait=True)
         
         robot.move_to(x, y, MIN_Z, wait=True)
@@ -163,7 +189,7 @@ class AudioLoop:
         
         x,y = self.get_coordinates(int(dropoff_pos))
         
-        await self.speak_text(f"Moving on X axis: x={x}, y={y} for dropoff")
+        await self.speak_text(f"Moving on {dropoff_pos} for dropoff")
         
         robot.move_to(x, y, MAX_Z, wait=True)
                 
@@ -284,7 +310,8 @@ class AudioLoop:
                     image_bytes = image_io.read()
                 except Exception as e:
                     print(f"Error processing frame: {e}")
-                    continue
+                    # process_tool_calls
+                    continue 
                 
                 try:
                     # Check for key press (q to quit)
@@ -318,30 +345,37 @@ class AudioLoop:
     async def send_realtime(self):
         while True:
             msg = await self.out_queue.get()
+            print("Sending message to gemini")
             await self.session.send(input=msg)
 
     async def listen_audio(self):
-        print("Listening for audio...")
+        logger.info("Starting audio listener")
         global paused
         if paused:
+            logger.debug("Audio processing paused")
             return
-        mic_info = pya.get_default_input_device_info()
-        self.audio_stream = await asyncio.to_thread(
-            pya.open,
-            format=FORMAT,
-            channels=CHANNELS,
-            rate=SEND_SAMPLE_RATE,
-            input=True,
-            input_device_index=mic_info["index"],
-            frames_per_buffer=CHUNK_SIZE,
-        )
-        if __debug__:
-            kwargs = {"exception_on_overflow": False}
-        else:
-            kwargs = {}
-        while True:
-            data = await asyncio.to_thread(self.audio_stream.read, CHUNK_SIZE, **kwargs)
-            await self.out_queue.put({"data": data, "mime_type": "audio/pcm"})
+        try:
+            mic_info = pya.get_default_input_device_info()
+            logger.debug("Using microphone: %s", mic_info["name"])
+            
+            self.audio_stream = await asyncio.to_thread(
+                pya.open,
+                format=FORMAT,
+                channels=CHANNELS,
+                rate=SEND_SAMPLE_RATE,
+                input=True,
+                input_device_index=mic_info["index"],
+                frames_per_buffer=CHUNK_SIZE,
+            )
+            logger.info("Audio stream initialized successfully")
+            
+            while True:
+                data = await asyncio.to_thread(self.audio_stream.read, CHUNK_SIZE)
+                await self.out_queue.put({"data": data, "mime_type": "audio/pcm"})
+                
+        except Exception as e:
+            logger.error("Error in audio listener: %s", str(e))
+            logger.debug("Error details:", exc_info=True)
 
     async def speak_text(self, text: str):
         """Speak out the given text string."""
@@ -357,117 +391,123 @@ class AudioLoop:
 
     async def process_tool_calls(self, response):
         """Process tool calls from the model response."""
+        global paused
+        if not response.text:
+            logger.debug("Empty response received")
+            return None
+
         try:
-            if not response.text:
-                print("Debug: Response text is None or empty.")
-                return None
+            # Clean up response text
+            if response.text.startswith('```') and response.text.endswith('```'):
+                response_text = response.text.strip().strip('`')
+                if response_text.lower().startswith('json'):
+                    response_text = response_text[4:].strip()
 
-            print(f"Debug: Processing response text for tool calls... Response text: {response.text}")
+                try:
+                    tool_call = json.loads(response_text)
+                    function_name = tool_call.get("function")
+                    function_args = tool_call.get("arguments", {})
+                    
+                    logger.info("Processing tool call: %s", function_name)
+                    logger.debug("Function arguments: %s", function_args)
+                    
+                    # Execute function
+                    if function_name == "pickup_from_to":
+                        result = await self.pickup_from_to(
+                            function_args["pickup_pos"], 
+                            function_args["dropoff_pos"]
+                        )
+                        logger.info("Pickup operation completed")
+                    else:
+                        logger.warning("Unknown function called: %s", function_name)
+                        result = f"Unknown function: {function_name}"
+                    
+                    return result
+                    
+                except json.JSONDecodeError as e:
+                    logger.error("Failed to parse JSON response: %s", str(e))
+                    logger.debug("Invalid JSON text: %s", response.text)
             
-            # Clean up and normalize the response text
-            response_text = response.text.strip().strip('`')  # Remove all backticks
-            if response_text.lower().startswith('json'):
-                response_text = response_text[4:].strip()  # Remove 'json' prefix
-
-            try:
-                tool_call = json.loads(response_text)  # Convert JSON string to dictionary
-                function_name = tool_call.get("function")
-                function_args = tool_call.get("arguments", {})
-                print(type(function_args))
-                print(f"Debug: Function called: {function_name} with args: {function_args}")
+            elif "close" in response.text or "exit" in response.text or "stop" in response.text: 
+                paused = True
+                self.home()
+                paused = False
                 
-                # Execute the appropriate function based on the tool call
-                if function_name == "pickup_from_to":
-                    result = await self.pickup_from_to(function_args["pickup_pos"], function_args["dropoff_pos"])
-                else:
-                    result = f"Unknown function: {function_name}"
-                    await self.speak_text(result)
-                
-                print(f"Debug: Function result: {result}")
-                return result
-            except json.JSONDecodeError as json_e:
-                print(f"Debug: Error parsing response text as JSON: {json_e} for text: {response.text}")
+            else:
                 await self.speak_text(response.text)
+                paused = False
+            
+                
+                
         except Exception as e:
-            print(f"Error processing response text: {e}")
+            logger.error("Error processing tool call: %s", str(e))
+            logger.debug("Error details:", exc_info=True)
             return None
         
     async def recieve_response(self):
-        "Background task to reads from the websocket and write pcm chunks to the output queue"
-        print("receiving video")
-        # Flag to track if a tool is currently executing
-        self.is_tool_executing = False
+        logger.info("Starting response receiver")
         
-        while True:
-            async for response in self.session.receive():
-                print("Response received")  
-                # Check for tool calls
-                if not self.is_tool_executing:
-                    tool_result = await self.process_tool_calls(response)
+        try:
+            while True:
+                async for response in self.session.receive():
+                    logger.debug("Response received from model")
+                    
                     global paused
                     paused = True
+                    tool_result = await self.process_tool_calls(response)
+                    
                     if tool_result:
-                        print(f"Tool execution result: {tool_result}")
-                        self.is_tool_executing = True
+                        logger.info("Tool execution result: %s", tool_result)
+                        print("Sending message to gemini")
+                        await self.session.send(
+                            input=f"Function called, System generated function result: {tool_result}\n"
+                                    "IF THE USER DOES NOT ASK ANYTHING TO DO. DO NOT DO ANYTHING UNTIL TOLD.",
+                            end_of_turn=True
+                        )
                         
-                        # Pass the function result back to Gemini
-                        await self.session.send(input=f"Function called, System generated function result: {tool_result}\nIF THE USER DOES NOT ASK ANYTHING TO DO. DO NOT DO ANYTHING UNTIL TOLD.", end_of_turn=True)
+                    paused = False
+                    
                         
-                        # Reset the flag after sending the result
-                        self.is_tool_executing = False
-                        paused = False
-                        continue
-                
-                if data := response.data:
-                    self.audio_in_queue.put_nowait(data)
-                    continue
-                
-                if text := response.text:
-                    print("Text received!")
+        except Exception as e:
+            logger.error("Error in response receiver: %s", str(e))
+            logger.debug("Error details:", exc_info=True)
 
-            while not self.audio_in_queue.empty():
-                self.audio_in_queue.get_nowait()
-                
     async def run(self):
         try:
-            print("Starting with tools configuration...")
+            logger.info("Starting robot control system")
             
             async with (
                 client.aio.live.connect(
-                    model=MODEL, 
-                        config=types.LiveConnectConfig(
-                    response_modalities=["TEXT"],
-                            system_instruction=types.Content(parts=[{"text": SYSTEM_INSTRUCTION}]),  
-                        tools=[
-                        self.pickup_from_to
-                        ],
+                    model=MODEL,
+                    config=types.LiveConnectConfig(
+                        response_modalities=["TEXT"],
+                        system_instruction=types.Content(parts=[{"text": SYSTEM_INSTRUCTION}]),
+                        tools=[self.pickup_from_to],
                     )
-                ) as session, 
+                ) as session,
                 asyncio.TaskGroup() as tg,
             ):
-                print("Session connected successfully with tools configured")
+                logger.info("Connected to AI model successfully")
                 self.session = session
-                self.is_tool_executing = False  # Initialize tool execution flag
-# 
+                self.is_tool_executing = False
+
                 self.audio_in_queue = asyncio.Queue()
                 self.out_queue = asyncio.Queue(maxsize=2)
 
-                # Test the tools by sending a message to prompt tool usage
+                logger.debug("Initializing background tasks")
                 send_realtime_task = tg.create_task(self.send_realtime())
                 listen_audio_task = tg.create_task(self.listen_audio())
                 tg.create_task(self.get_frames())
-
                 tg.create_task(self.recieve_response())
 
-
                 await send_realtime_task
-                raise asyncio.CancelledError("User requested exit")
-
+                
         except asyncio.CancelledError:
-            pass
-        except ExceptionGroup as EG:
+            logger.info("Shutting down robot control system")
+        except Exception as e:
+            logger.error("Critical error in main loop: %s", str(e))
+            logger.debug("Error details:", exc_info=True)
             self.audio_stream.close()
-            traceback.print_exception(EG)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -479,6 +519,8 @@ if __name__ == "__main__":
         choices=["camera", "none"],
     )
     args = parser.parse_args()
+    
+    logger.info("Starting application with mode: %s", args.mode)
     main = AudioLoop(video_mode=args.mode)
     asyncio.run(main.run())
     
