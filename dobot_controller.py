@@ -116,7 +116,11 @@ class DobotController:
         queue_index = self.bot.set_arc_command(intermediate_point, target_pos)
         
         if wait:
+<<<<<<< Updated upstream
             self._wait_for_queue(queue_index)  # Wait for movement to complete using queue index
+=======
+            sleep(3)  # Wait for movement to complete
+>>>>>>> Stashed changes
     
     def move_relative(self, dx: float, dy: float, dz: float, dr: float = 0, wait: bool = True):
         """Move the robot relative to its current position using continuous trajectory for smoother motion.
