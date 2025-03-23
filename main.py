@@ -466,14 +466,25 @@ class AudioLoop:
         
     async def receive_audio(self):
         "Background task to reads from the websocket and write pcm chunks to the output queue"
-        print("recieveing video")
+        print("receiving video")
+        # Flag to track if a tool is currently executing
+        self.is_tool_executing = False
+        
         while True:
             async for response in self.session.receive():
                 print("Response received")  
-                # # Check for tool calls
-                tool_result = await self.process_tool_calls(response)
-                if tool_result:
-                    print(f"Tool execution result: {tool_result}")
+                # Check for tool calls
+                if not self.is_tool_executing:
+                    tool_result = await self.process_tool_calls(response)
+                    if tool_result:
+                        print(f"Tool execution result: {tool_result}")
+                        self.is_tool_executing = True
+                        
+                        # Pass the function result back to Gemini
+                        await self.session.send(input=f"Function called, System generated function result: {tool_result}", end_of_turn=True)
+                        
+                        # Reset the flag after sending the result
+                        self.is_tool_executing = False
                 
                 if data := response.data:
                     self.audio_in_queue.put_nowait(data)
@@ -504,15 +515,16 @@ class AudioLoop:
             ):
                 print("Session connected successfully with tools configured")
                 self.session = session
+                self.is_tool_executing = False  # Initialize tool execution flag
 # 
                 self.audio_in_queue = asyncio.Queue()
-                self.out_queue = asyncio.Queue(maxsize=5)
+                self.out_queue = asyncio.Queue(maxsize=1)
 
                 # Test the tools by sending a message to prompt tool usage
                 
-                send_text_task = tg.create_task(self.send_text())
-                tg.create_task(self.send_realtime())
-                tg.create_task(self.listen_audio())
+                # send_text_task = tg.create_task(self.send_text())
+                send_realtime_task = tg.create_task(self.send_realtime())
+                listen_audio_task = tg.create_task(self.listen_audio())
                 if self.video_mode == "camera":
                     tg.create_task(self.get_frames())
                 elif self.video_mode == "screen":
@@ -521,7 +533,8 @@ class AudioLoop:
                 tg.create_task(self.receive_audio())
                 tg.create_task(self.play_audio())
 
-                await send_text_task
+                # await send_text_task
+                await send_realtime_task
                 raise asyncio.CancelledError("User requested exit")
 
         except asyncio.CancelledError:
