@@ -199,6 +199,8 @@ class AudioLoop:
         
         robot.set_gripper(enable=True, grip=False)
         
+        time.sleep(1)
+        
         robot.home()
         return f"Picked up object from position : {pickup_pos} and  dropped the object to position: {dropoff_pos}"
         
@@ -350,10 +352,10 @@ class AudioLoop:
 
     async def listen_audio(self):
         logger.info("Starting audio listener")
-        global paused
-        if paused:
-            logger.debug("Audio processing paused")
-            return
+        # global paused
+        # if paused:
+        #     logger.debug("Audio processing paused")
+        #     return
         try:
             mic_info = pya.get_default_input_device_info()
             logger.debug("Using microphone: %s", mic_info["name"])
@@ -430,7 +432,7 @@ class AudioLoop:
             
             elif "close" in response.text or "exit" in response.text or "stop" in response.text: 
                 paused = True
-                self.home()
+                await self.home()
                 paused = False
                 
             else:
@@ -453,7 +455,7 @@ class AudioLoop:
                     logger.debug("Response received from model")
                     
                     global paused
-                    paused = True
+                    # paused = True
                     tool_result = await self.process_tool_calls(response)
                     
                     if tool_result:
@@ -465,7 +467,7 @@ class AudioLoop:
                             end_of_turn=True
                         )
                         
-                    paused = False
+                    # paused = False
                     
                         
         except Exception as e:
