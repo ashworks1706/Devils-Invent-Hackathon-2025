@@ -183,6 +183,9 @@ class AudioLoop:
         grid_1 = (250, -170)  
         grid_90 = (330, 160) 
         
+        
+        
+        
         # Grid dimensions
         cols = 18
         rows = 5
@@ -447,24 +450,35 @@ class AudioLoop:
     async def listen_audio(self):
         logger.info("Starting audio listener")
         try:
-            mic_info = pya.get_default_input_device_info()
+            # List available audio input devices
+            num_devices = pya.get_device_count()
+            logger.info("Available audio input devices:")
+            for i in range(num_devices):
+                device_info = pya.get_device_info_by_index(i)
+            if device_info['maxInputChannels'] > 0:
+                logger.info(f"Index: {i}, Name: {device_info['name']}")
+
+            # Prompt the user to select an audio input device
+            device_index = int(input("Enter the index of the desired audio input device: "))
+            
+            mic_info = pya.get_device_info_by_index(device_index)
             logger.debug("Using microphone: %s", mic_info["name"])
             
             self.audio_stream = await asyncio.to_thread(
-                pya.open,
-                format=FORMAT,
-                channels=CHANNELS,
-                rate=SEND_SAMPLE_RATE,
-                input=True,
-                input_device_index=mic_info["index"],
-                frames_per_buffer=CHUNK_SIZE,
+            pya.open,
+            format=FORMAT,
+            channels=CHANNELS,
+            rate=SEND_SAMPLE_RATE,
+            input=True,
+            input_device_index=mic_info["index"],
+            frames_per_buffer=CHUNK_SIZE,
             )
             logger.info("Audio stream initialized successfully")
             
             while True:
                 data = await asyncio.to_thread(self.audio_stream.read, CHUNK_SIZE)
                 await self.out_queue.put({"data": data, "mime_type": "audio/pcm"})
-                
+            
         except Exception as e:
             logger.error("Error in audio listener: %s", str(e))
             logger.debug("Error details:", exc_info=True)
