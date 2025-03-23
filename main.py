@@ -1,7 +1,3 @@
-
-# sudo chmod 666 /dev/ttyACM0
-
-# Add this import at the top
 import numpy as np
 import asyncio
 from google.genai.types import Content 
@@ -22,13 +18,13 @@ import pyttsx3
 from google import genai
 import re
 import json
-# from dobot_controller import DobotController
+from dobot_controller import DobotController
 
-# # Initialize the robot
-# robot = DobotController()
+# Initialize the robot
+robot = DobotController()
 
-# # Return home
-# robot.home()
+# Return home
+robot.home()
 
 MAX_Z = 200
 MIN_Z = -200
@@ -108,43 +104,49 @@ class AudioLoop:
         # robot.home()
         return "Cancelled operations and Returned to home position"
     
-    
+    def get_coordinates(self, grid_index: int):
+        """Get the coordinates of the grid"""
+        grid_1 = (280, -125)
+        grid_90 = (300, 220)
+        # indexes are in a grid that is 18 across (y) and 5 down (x)
+        x = grid_1[0] + (grid_index % 18) * (grid_90[0] - grid_1[0]) / 18
+        y = grid_1[1] + (grid_index // 18) * (grid_90[1] - grid_1[1]) / 5
+        return (x, y)
+        
     async def pickup_from_to(self, pickup_pos: str, dropoff_pos: str):
         """Move to relative pos coordinates and pickup then drop to position"""
             
         await self.speak_text(f"Moving on to {pickup_pos} for pickup and dropped to {dropoff_pos}")
         
-        # # map pos coordinate
+        # map pos coordinate
         
-        # x,y,z = self.coordinates[pos]
+        x,y = self.get_coordinates(int(pickup_pos))
         
-        # self.speak_text(f"Moving on X axis: x={x}, y={y} for pickup")
+        self.speak_text(f"Moving on X axis: x={x}, y={y} for pickup")
                 
-        # robot.move_to(x, y, MAX_Z)
+        robot.move_to(x, y, MAX_Z)
         
-        # self.speak_text(f"Going down on z axis: z={z}")
+        self.speak_text(f"Going down on z axis: z={z}")
                 
-        # robot.move_to(x, y, MIN_Z)
+        robot.move_to(x, y, MIN_Z)
         
-        # self.speak_text("Grabbing object")
+        self.speak_text("Grabbing object")
         
-        # robot.set_gripper(enable=True, grip=True)
+        robot.set_gripper(enable=True, grip=True)
         
-        # self.speak_text(f"Going up on z axis: z={z}")
+        self.speak_text(f"Going up on z axis: z={z}")
                 
-        # robot.move_to(x, y, MAX_Z)
+        robot.move_to(x, y, MAX_Z)
         
-        # self.speak_text(f"Moving on X axis: x={x}, y={y} for dropoff")
+        self.speak_text(f"Moving on X axis: x={x}, y={y} for dropoff")
                 
-        # self.speak_text(f"Going down on z axis: z={z} for dropoff ")
+        self.speak_text(f"Going down on z axis: z={z} for dropoff ")
                 
-        # robot.move_to(x, y, MIN_Z)
+        robot.move_to(x, y, MIN_Z)
         
-        # self.speak_text("Dropping object")
+        self.speak_text("Dropping object")
         
-        # robot.set_gripper(enable=True, grip=False)
-        
-        
+        robot.set_gripper(enable=True, grip=False)
         
         return f"Picked up object from position : {pickup_pos} and  dropped the object to position: {dropoff_pos}"
         
