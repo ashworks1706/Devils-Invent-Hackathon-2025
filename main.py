@@ -6,10 +6,7 @@ import cv2
 import pyaudio
 from google.genai import types
 import PIL.Image
-<<<<<<< Updated upstream
-=======
 import mss
->>>>>>> Stashed changes
 import time
 import argparse
 import pyttsx3
@@ -43,13 +40,10 @@ robot = DobotController()
 robot.home()
 
 MAX_Z = 200
-<<<<<<< Updated upstream
 MIN_Z = -23
-=======
 MIN_Z = 0
 
 
->>>>>>> Stashed changes
 
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
@@ -183,7 +177,6 @@ class AudioLoop:
         logger.info("Returning robot to home position")
         await self.speak_text("Cancelling positions and Returning to home position")
         robot.home()
-<<<<<<< Updated upstream
         
         logger.debug("Home position reached")
         
@@ -196,14 +189,13 @@ class AudioLoop:
         
         
         
-=======
+
         return "Cancelled operations and Returned to home position"
     
     def get_coordinates(self, grid_index: int):
         """Get the coordinates of the grid"""
         grid_1 = (280, -125)
         grid_90 = (300, 220)
->>>>>>> Stashed changes
         
         # Grid dimensions
         cols = 18
@@ -228,35 +220,28 @@ class AudioLoop:
         self.add_task(task_description)
             
         # Return to home position
-<<<<<<< Updated upstream
         robot.set_gripper(enable=True, grip=False)
         
         x,y = self.get_coordinates(int(pickup_block))
-=======
         await self.speak_text(f"Moving to Home position for recalibration")
         robot.home()
         robot.set_gripper(enable=True, grip=False)
->>>>>>> Stashed changes
         
         await self.speak_text(f"Moving to {pickup_block} for pickup")
         robot.move_to(x, y, MAX_Z, wait=True)
         
-<<<<<<< Updated upstream
         robot.move_to(x, y, MIN_Z, wait=True)
         
-=======
         await self.speak_text(f"Moving on X axis: x={x}, y={y} for pickup")
         robot.move_to(x, y, MAX_Z, wait=True)
         
         robot.move_to(x, y, MIN_Z, wait=True)
         
->>>>>>> Stashed changes
         await self.speak_text("Grabbing object")
         
         robot.set_gripper(enable=True, grip=True)
         time.sleep(2)
         
-<<<<<<< Updated upstream
         robot.home()
         
         x,y = self.get_coordinates(int(dropoff_block))
@@ -266,7 +251,6 @@ class AudioLoop:
         robot.move_to(x, y, MAX_Z, wait=True)
                 
         robot.move_to(x, y, MIN_Z + 20, wait=True)
-=======
         time.sleep(1)
         robot.home()
         
@@ -278,18 +262,14 @@ class AudioLoop:
         time.sleep(1)
                 
         robot.move_to(x, y, MIN_Z, wait=True)
->>>>>>> Stashed changes
         
         await self.speak_text("Dropping object")
         
         robot.set_gripper(enable=True, grip=False)
         
-<<<<<<< Updated upstream
         time.sleep(2)
-=======
         robot.home()
         return f"Picked up object from position : {pickup_pos} and  dropped the object to position: {dropoff_pos}"
->>>>>>> Stashed changes
         
         robot.home()
         return f"Tried picking up object from position : {pickup_block} and the object to position: {dropoff_block}. Please confirm if the object is placed correctly in the image. Please proceed with the next action based on the current state"
