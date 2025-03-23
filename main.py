@@ -70,7 +70,27 @@ You are an AI assistant name "Eeve" controlling a robotic arm. Only listen only 
     c) drop_off(dropoff_block): Move arm to dropoff position.
     d) home(): Return robot to home position and cancel operations when required.
 
-5. When executing functions, respond ONLY in JSON format as follows:
+5. You can call multiple functions in a single turn. Respond ONLY in JSON format as follows, with a list of function calls:
+
+    ```json
+    [
+        {
+             "function": "pickup_from_to",
+             "arguments": {
+                  "pickup_block": "", # Required
+                  "dropoff_block": "" # Required
+             }
+        },
+        {
+             "function": "drop_off",
+             "arguments": {
+                  "dropoff_block": "" # Required
+             }
+        }
+    ]
+    ```
+
+    Each object in the list represents a separate function call.  The entire response must be valid JSON.
 
     For pickup_from_to:
     ```
@@ -108,15 +128,16 @@ You are an AI assistant name "Eeve" controlling a robotic arm. Only listen only 
          "arguments": {}
     }
     ```
+ 
 
-6. Grid reference:
+7. Grid reference:
     - Bottom left corner: index 18
     - Center: index 45
     - Use appropriate indices for pickup and dropoff positions
 
-7. If the user doesn't request an action, do not initiate any function calls.
+8. If the user doesn't request an action, do not initiate any function calls.
 
-8. For non-function responses, use natural language to interact with the user.
+9. For non-function responses, use natural language to interact with the user.
 
 Remember: Only perform actions when explicitly instructed. Maintain a helpful and informative tone in all interactions.
 """
@@ -153,7 +174,7 @@ class AudioLoop:
         await self.speak_text("Cancelling positions and Returning to home position")
         robot.home()
         logger.debug("Home position reached")
-        return "Cancelled operations and Returned to home position"
+        return "Cancelled operations and Returned to home position. Please proceed with the next action based on the current state"
     
     def get_coordinates(self, grid_index: int):
         """Get the coordinates of the grid"""
@@ -214,7 +235,7 @@ class AudioLoop:
         time.sleep(2)
         
         robot.home()
-        return f"Tried picking up object from position : {pickup_block} and the object to position: {dropoff_block}. Please confirm if the object is placed correctly in the image."
+        return f"Tried picking up object from position : {pickup_block} and the object to position: {dropoff_block}. Please confirm if the object is placed correctly in the image. Please proceed with the next action based on the current state"
         
     async def pickup_hold(self, pickup_block: int):
         """Move to relative pos coordinates and pickup to position"""
@@ -238,7 +259,7 @@ class AudioLoop:
         robot.home()
         time.sleep(2)
         
-        return f"Tried picking up object from position : {pickup_block} and tried holding the object. Please confirm if the object is placed correctly in the image."
+        return f"Tried picking up object from position : {pickup_block} and tried holding the object. Please confirm if the object is placed correctly in the image. Please proceed with the next action based on the current state."
     
     async def drop_off(self, dropoff_block: int):
         """Move to relative pos coordinates and drop to position"""
@@ -261,7 +282,7 @@ class AudioLoop:
         time.sleep(2)
         
         robot.home()
-        return f"tried dropped the object to position: {dropoff_block}. Please confirm if the object is placed correctly in the image."
+        return f"tried dropped the object to position: {dropoff_block}. Please confirm if the object is placed correctly in the image. Please proceed with the next action based on the current state."
     
     def add_task(self, task_description):
         """Add a task to the task queue, maintaining a maximum size of 5."""
@@ -466,41 +487,81 @@ class AudioLoop:
 
         try:
             # Clean up response text
-            if (response.text.startswith('```') and response.text.endswith('```') ) or response.text.startswith('json'):
+            if (response.text.startswith('```') and response.text.endswith('```')) or response.text.startswith('json'):
                 response_text = response.text.strip().strip('`')
                 
                 if response_text.lower().startswith('json'):
                     response_text = response_text[4:].strip()
 
                 try:
-                    tool_call = json.loads(response_text)
-                    function_name = tool_call.get("function")
-                    function_args = tool_call.get("arguments", {})
+                    tool_calls = json.loads(response_text)
                     
-                    logger.info("Processing tool call: %s", function_name)
-                    logger.debug("Function arguments: %s", function_args)
-                    
-                    # Execute function
-                    if function_name == "pickup_from_to":
-                        result = await self.pickup_from_to(
-                            function_args["pickup_block"], 
-                            function_args["dropoff_block"]
-                        )
+                    if isinstance(tool_calls, list):
+                        results = []
+                        for tool_call in tool_calls:
+                            function_name = tool_call.get("function")
+                            function_args = tool_call.get("arguments", {})
+                            
+                            logger.info("Processing tool call: %s", function_name)
+                            logger.debug("Function arguments: %s", function_args)
+                            
+                            result = None  # Initialize result
+                            
+                            # Execute function
+                            if function_name == "pickup_from_to":
+                                result = await self.pickup_from_to(
+                                    function_args["pickup_block"], 
+                                    function_args["dropoff_block"]
+                                )
+                            elif function_name == "drop_off":
+                                result = await self.drop_off(
+                                    function_args["dropoff_block"]
+                                )
+                            elif function_name == "pickup_hold":
+                                result = await self.pickup_hold(
+                                    function_args["pickup_block"]
+                                )
+                            elif function_name == "home":
+                                result = await self.home()
+                            else:
+                                logger.warning("Unknown function called: %s", function_name)
+                                result = f"Unknown function: {function_name}"
+                            
+                            if result:
+                                results.append(result)
                         
-                    if function_name == "drop_off":
-                        result = await self.drop_off(
-                            function_args["dropoff_block"]
-                        )
-                    if function_name == "pickup_hold":
-                        result = await self.pickup_hold(
-                            function_args["pickup_block"]
-                        )
-                        
+                        return "\n".join(results)  # Combine results into a single string
                     else:
-                        logger.warning("Unknown function called: %s", function_name)
-                        result = f"Unknown function: {function_name}"
-                    
-                    return result
+                        # Handle single tool call (non-list)
+                        function_name = tool_calls.get("function")
+                        function_args = tool_calls.get("arguments", {})
+                        
+                        logger.info("Processing tool call: %s", function_name)
+                        logger.debug("Function arguments: %s", function_args)
+                        
+                        result = None
+                        
+                        # Execute function
+                        if function_name == "pickup_from_to":
+                            result = await self.pickup_from_to(
+                                function_args["pickup_block"], 
+                                function_args["dropoff_block"]
+                            )
+                        elif function_name == "drop_off":
+                            result = await self.drop_off(
+                                function_args["dropoff_block"]
+                            )
+                        elif function_name == "pickup_hold":
+                            result = await self.pickup_hold(
+                                function_args["pickup_block"]
+                            )
+                        elif function_name == "home":
+                            result = await self.home()
+                        else:
+                            logger.warning("Unknown function called: %s", function_name)
+                            result = f"Unknown function: {function_name}"
+                        
+                        return result
                     
                 except json.JSONDecodeError as e:
                     logger.error("Failed to parse JSON response: %s", str(e))
@@ -519,6 +580,7 @@ class AudioLoop:
                 
         except Exception as e:
             logger.error("Error processing tool call: %s", str(e))
+            logger.error(response.text)
             logger.debug("Error details:", exc_info=True)
             return None
         
