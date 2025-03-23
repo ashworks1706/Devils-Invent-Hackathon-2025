@@ -177,9 +177,7 @@ class AudioLoop:
         logger.info("Returning robot to home position")
         await self.speak_text("Cancelling positions and Returning to home position")
         robot.home()
-        
         logger.debug("Home position reached")
-        
         return "Cancelled operations and Returned to home position. Please proceed with the next action based on the current state"
     
     def get_coordinates(self, grid_index: int):
