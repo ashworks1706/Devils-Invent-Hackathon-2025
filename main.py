@@ -189,10 +189,10 @@ class AudioLoop:
             # causing the audio pipeline to overflow if you don't to_thread it.
             try:
                 cap = await asyncio.to_thread(
-                    cv2.VideoCapture, "/dev/video0"
+                    # cv2.VideoCapture, "/dev/video0"
                     # integrated camera
                     # external camera
-                    # cv2.VideoCapture, "/dev/video4"
+                    cv2.VideoCapture, "/dev/video4"
                 )  
                 print("Camera initialized successfully")
             except Exception as e:
