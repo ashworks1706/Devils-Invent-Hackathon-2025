@@ -1,22 +1,15 @@
-import numpy as np
 import asyncio
-from google.genai.types import Content 
 import base64
 import io
-import os
-import sys
 import traceback
 import cv2
 import pyaudio
 from google.genai import types
 import PIL.Image
-import mss
 import time
 import argparse
 import pyttsx3
-from time import sleep
 from google import genai
-import re
 import json
 from dobot_controller import DobotController
 import logging
@@ -52,7 +45,7 @@ FORMAT = pyaudio.paInt16
 CHANNELS = 1
 SEND_SAMPLE_RATE = 16000
 RECEIVE_SAMPLE_RATE = 24000
-CHUNK_SIZE = 1024
+CHUNK_SIZE = 2048
 
 MODEL = "models/gemini-2.0-flash-exp"
 
@@ -151,6 +144,7 @@ class AudioLoop:
         self.engine = pyttsx3.init()
         self.engine.setProperty('rate', 150)  # Adjust speaking rate
         self.engine.setProperty('volume', 0.9)  # Adjust volume (0.0 to 1.0)
+        self.task_queue = []  # Initialize task queue
 
 
     async def home(self):
@@ -185,6 +179,8 @@ class AudioLoop:
         
     async def pickup_from_to(self, pickup_block: int, dropoff_block: int):
         """Move to relative pos coordinates and pickup to position"""
+        task_description = f"Pickup from {pickup_block} to {dropoff_block}"
+        self.add_task(task_description)
             
         # Return to home position
         robot.set_gripper(enable=True, grip=False)
@@ -222,6 +218,8 @@ class AudioLoop:
         
     async def pickup_hold(self, pickup_block: int):
         """Move to relative pos coordinates and pickup to position"""
+        task_description = f"Pickup and hold {pickup_block}"
+        self.add_task(task_description)
             
         # Return to home position
         robot.set_gripper(enable=True, grip=False)
@@ -244,6 +242,8 @@ class AudioLoop:
     
     async def drop_off(self, dropoff_block: int):
         """Move to relative pos coordinates and drop to position"""
+        task_description = f"Drop off at {dropoff_block}"
+        self.add_task(task_description)
             
         
         x,y = self.get_coordinates(int(dropoff_block))
@@ -263,6 +263,12 @@ class AudioLoop:
         robot.home()
         return f"tried dropped the object to position: {dropoff_block}. Please confirm if the object is placed correctly in the image."
     
+    def add_task(self, task_description):
+        """Add a task to the task queue, maintaining a maximum size of 5."""
+        self.task_queue.append(task_description)
+        if len(self.task_queue) > 5:
+            self.task_queue.pop(0)  # Remove the oldest task
+
     async def get_frames(self):
         try:
             # Initialize the camera
@@ -278,6 +284,7 @@ class AudioLoop:
             # Create a window to display the video
             try:
                 cv2.namedWindow("Camera Feed", cv2.WINDOW_NORMAL)
+                cv2.resizeWindow("Camera Feed", 1280, 720)  # Set the desired window size
                 print("Display window created")
             except Exception as e:
                 print(f"Error creating window: {e}")
@@ -351,6 +358,12 @@ class AudioLoop:
                     cv2.putText(frame, f"Offset X: {offset_x_manual}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
                     cv2.putText(frame, f"Offset Y: {offset_y_manual}", (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
                     cv2.putText(frame, f"Rotation: {rotation_angle}°", (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+                    
+                    # Display task queue on the frame
+                    for i, task in enumerate(self.task_queue):
+                        y = 120 + i * 20  # Adjust vertical position for each task
+                        cv2.putText(frame, f"Task {i+1}: {task}", (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                    
                     # Display the frame
                     cv2.imshow("Camera Feed", frame)
                 except Exception as e:
@@ -578,7 +591,7 @@ if __name__ == "__main__":
         type=str,
         default=DEFAULT_MODE,
         help="pixels to stream from",
-        choices=["camera", "none"],
+        choices=["camera"],
     )
     args = parser.parse_args()
     
