@@ -31,7 +31,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Add file handler for debugging
-debug_file = f'robot_debug_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
+debug_file = f'multimodal-live/robot_debug_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
 file_handler = logging.FileHandler(debug_file)
 file_handler.setLevel(logging.DEBUG)
 file_handler.setFormatter(logging.Formatter(
@@ -46,11 +46,7 @@ robot = DobotController()
 robot.home()
 
 MAX_Z = 200
-MIN_Z = -25
-
-global paused
-paused = False
-
+MIN_Z = -23
 
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
@@ -70,48 +66,70 @@ client = genai.Client(api_key='AIzaSyAR_4Nk8x9jq2rl4FIZ6v4OudZSuwvYyDg',http_opt
 # TEXT may be passed here.
 
 SYSTEM_INSTRUCTION = """
-You are an AI assistant controlling a robotic arm. Your role is to help users manipulate objects using the arm. Follow these guidelines:
+You are an AI assistant name "Eeve" controlling a robotic arm. Only listen only when they're talking to you. Your role is to help users manipulate objects using the arm. Follow these guidelines:
 
 1. Use the grid overlay on the camera feed to identify object positions.
-2. Only respond with actions when explicitly instructed by the user.
-3. Available functions:
-   a) pickup_from_to(pickup_pos, dropoff_pos): Move arm to pickup position, grab object, and move to dropoff position.
-   b) home(): Return robot to home position and cancel operations when required.
+2. When picking up objects, estimate the center of mass and use the grid index closest to that point.
+3. Only respond with actions when explicitly instructed by the user.
+4. Available functions:
+    a) pickup_from_to(pickup_block, dropoff_block): Move arm to pickup position, grab object, and move to dropoff position.
+    b) pickup_hold(pickup_block): Move arm to pickup position, grab object in arm.
+    c) drop_off(dropoff_block): Move arm to dropoff position.
+    d) home(): Return robot to home position and cancel operations when required.
 
-4. When executing functions, respond ONLY in JSON format as follows:
+5. When executing functions, respond ONLY in JSON format as follows:
 
-   For pickup_from_to:
-   ```
-   {
-       "function": "pickup_from_to",
-       "arguments": {
-           "pickup_pos": "",
-           "dropoff_pos": ""
-       }
-   }
-   ```
+    For pickup_from_to:
+    ```
+    {
+         "function": "pickup_from_to",
+         "arguments": {
+              "pickup_block": "" # Required,
+              "dropoff_block": "" # Required,
+         }
+    }
+    ```
+    For drop_off:
+    ```
+    {
+         "function": "drop_off",
+         "arguments": {
+              "dropoff_block": "" # Required
+         }
+    }
+    ```
+    For pickup_hold:
+    ```
+    {
+         "function": "pickup_hold",
+         "arguments": {
+              "pickup_block": "" # Required
+         }
+    }
+    ```
 
-   For home:
-   ```
-   {
-       "function": "home",
-       "arguments": {}
-   }
-   ```
+    For home:
+    ```
+    {
+         "function": "home",
+         "arguments": {}
+    }
+    ```
 
-5. Grid reference:
-   - Bottom left corner: index 18
-   - Center: index 45
-   - Use appropriate indices for pickup and dropoff positions
+6. Grid reference:
+    - Bottom left corner: index 18
+    - Center: index 45
+    - Use appropriate indices for pickup and dropoff positions
 
-6. If the user doesn't request an action, do not initiate any function calls.
+7. If the user doesn't request an action, do not initiate any function calls.
 
-7. For non-function responses, use natural language to interact with the user.
+8. For non-function responses, use natural language to interact with the user.
 
 Remember: Only perform actions when explicitly instructed. Maintain a helpful and informative tone in all interactions.
 """
 
 pya = pyaudio.PyAudio()
+
 
 
 class AudioLoop:
@@ -124,7 +142,7 @@ class AudioLoop:
         self.out_queue = None
 
         self.session = None
-
+        self.is_tool_executing = False
         self.recieve_response_task = None
         self.play_audio_task = None
         self.coordinates={}
@@ -165,17 +183,15 @@ class AudioLoop:
         
         return (x, y)
         
-    async def pickup_from_to(self, pickup_pos: int, dropoff_pos: int):
-        """Move to relative pos coordinates and pickup then drop to position"""
+    async def pickup_from_to(self, pickup_block: int, dropoff_block: int):
+        """Move to relative pos coordinates and pickup to position"""
             
         # Return to home position
-        await self.speak_text(f"Moving to Home position for recalibration")
-        robot.home()
         robot.set_gripper(enable=True, grip=False)
         
-        x,y = self.get_coordinates(int(pickup_pos))
+        x,y = self.get_coordinates(int(pickup_block))
         
-        await self.speak_text(f"Moving to {pickup_pos} for pickup")
+        await self.speak_text(f"Moving to {pickup_block} for pickup")
         robot.move_to(x, y, MAX_Z, wait=True)
         
         robot.move_to(x, y, MIN_Z, wait=True)
@@ -183,13 +199,13 @@ class AudioLoop:
         await self.speak_text("Grabbing object")
         
         robot.set_gripper(enable=True, grip=True)
-        sleep(2)
+        time.sleep(2)
         
         robot.home()
         
-        x,y = self.get_coordinates(int(dropoff_pos))
+        x,y = self.get_coordinates(int(dropoff_block))
         
-        await self.speak_text(f"Moving on {dropoff_pos} for dropoff")
+        await self.speak_text(f"Moving on {dropoff_block} for dropoff")
         
         robot.move_to(x, y, MAX_Z, wait=True)
                 
@@ -199,11 +215,53 @@ class AudioLoop:
         
         robot.set_gripper(enable=True, grip=False)
         
-        time.sleep(1)
+        time.sleep(2)
         
         robot.home()
-        return f"Picked up object from position : {pickup_pos} and  dropped the object to position: {dropoff_pos}"
+        return f"Tried picking up object from position : {pickup_block} and the object to position: {dropoff_block}. Please confirm if the object is placed correctly in the image."
         
+    async def pickup_hold(self, pickup_block: int):
+        """Move to relative pos coordinates and pickup to position"""
+            
+        # Return to home position
+        robot.set_gripper(enable=True, grip=False)
+        
+        x,y = self.get_coordinates(int(pickup_block))
+        
+        await self.speak_text(f"Moving to {pickup_block} for pickup")
+        robot.move_to(x, y, MAX_Z, wait=True)
+        
+        robot.move_to(x, y, MIN_Z, wait=True)
+        
+        await self.speak_text("Grabbing object")
+        
+        robot.set_gripper(enable=True, grip=True)
+        
+        robot.home()
+        time.sleep(2)
+        
+        return f"Tried picking up object from position : {pickup_block} and tried holding the object. Please confirm if the object is placed correctly in the image."
+    
+    async def drop_off(self, dropoff_block: int):
+        """Move to relative pos coordinates and drop to position"""
+            
+        
+        x,y = self.get_coordinates(int(dropoff_block))
+        
+        await self.speak_text(f"Moving on {dropoff_block} for dropoff")
+        
+        robot.move_to(x, y, MAX_Z, wait=True)
+                
+        robot.move_to(x, y, MIN_Z + 20, wait=True)
+        
+        await self.speak_text("Dropping object")
+        
+        robot.set_gripper(enable=True, grip=False)
+        
+        time.sleep(2)
+        
+        robot.home()
+        return f"tried dropped the object to position: {dropoff_block}. Please confirm if the object is placed correctly in the image."
     
     async def get_frames(self):
         try:
@@ -325,7 +383,7 @@ class AudioLoop:
                     print(f"Error checking key press: {e}")
 
                 try:
-                    await asyncio.sleep(1.0)
+                    # await asyncio.sleep(1.0)
                     await self.out_queue.put({"mime_type": mime_type, "data": base64.b64encode(image_bytes).decode()})
                     
                     
@@ -352,10 +410,6 @@ class AudioLoop:
 
     async def listen_audio(self):
         logger.info("Starting audio listener")
-        # global paused
-        # if paused:
-        #     logger.debug("Audio processing paused")
-        #     return
         try:
             mic_info = pya.get_default_input_device_info()
             logger.debug("Using microphone: %s", mic_info["name"])
@@ -393,15 +447,15 @@ class AudioLoop:
 
     async def process_tool_calls(self, response):
         """Process tool calls from the model response."""
-        global paused
-        if not response.text:
+        if not response.text :
             logger.debug("Empty response received")
             return None
 
         try:
             # Clean up response text
-            if response.text.startswith('```') and response.text.endswith('```'):
+            if (response.text.startswith('```') and response.text.endswith('```') ) or response.text.startswith('json'):
                 response_text = response.text.strip().strip('`')
+                
                 if response_text.lower().startswith('json'):
                     response_text = response_text[4:].strip()
 
@@ -416,10 +470,19 @@ class AudioLoop:
                     # Execute function
                     if function_name == "pickup_from_to":
                         result = await self.pickup_from_to(
-                            function_args["pickup_pos"], 
-                            function_args["dropoff_pos"]
+                            function_args["pickup_block"], 
+                            function_args["dropoff_block"]
                         )
-                        logger.info("Pickup operation completed")
+                        
+                    if function_name == "drop_off":
+                        result = await self.drop_off(
+                            function_args["dropoff_block"]
+                        )
+                    if function_name == "pickup_hold":
+                        result = await self.pickup_hold(
+                            function_args["pickup_block"]
+                        )
+                        
                     else:
                         logger.warning("Unknown function called: %s", function_name)
                         result = f"Unknown function: {function_name}"
@@ -431,13 +494,13 @@ class AudioLoop:
                     logger.debug("Invalid JSON text: %s", response.text)
             
             elif "close" in response.text or "exit" in response.text or "stop" in response.text: 
-                paused = True
                 await self.home()
-                paused = False
                 
             else:
-                await self.speak_text(response.text)
-                paused = False
+                if  "Eve" in response.text or not "Eeve" in response.text or not "Eevee" in response.text:    
+                    await self.speak_text(response.text)
+                else:
+                    print(response.text)
             
                 
                 
@@ -454,8 +517,6 @@ class AudioLoop:
                 async for response in self.session.receive():
                     logger.debug("Response received from model")
                     
-                    global paused
-                    # paused = True
                     tool_result = await self.process_tool_calls(response)
                     
                     if tool_result:
@@ -467,7 +528,6 @@ class AudioLoop:
                             end_of_turn=True
                         )
                         
-                    # paused = False
                     
                         
         except Exception as e:
@@ -484,7 +544,7 @@ class AudioLoop:
                     config=types.LiveConnectConfig(
                         response_modalities=["TEXT"],
                         system_instruction=types.Content(parts=[{"text": SYSTEM_INSTRUCTION}]),
-                        tools=[self.pickup_from_to],
+                        tools=[self.pickup_from_to, self.drop_off, self.home, self.pickup_hold],
                     )
                 ) as session,
                 asyncio.TaskGroup() as tg,
